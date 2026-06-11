@@ -61,3 +61,28 @@ Default: `unified`.
 ```
 
 The toolbar layout toggle persists the last user choice for future generated diff viewers. Passing `cmux diff --layout split` or `cmux diff --layout unified` overrides both the saved toolbar choice and this default for that invocation.
+
+## `shortcuts.bindings`
+
+Rebind cmux-owned keyboard shortcuts by action name. The full action list and syntax live in the [keyboard shortcuts docs](https://cmux.com/docs/keyboard-shortcuts) and the JSON schema (`web/data/cmux.schema.json`).
+
+Right-sidebar mode switching (active while the right sidebar is focused):
+
+| Action | Default | Shows |
+| --- | --- | --- |
+| `switchRightSidebarToFiles` | `ctrl+1` | Files |
+| `switchRightSidebarToFind` | `ctrl+2` | Find |
+| `switchRightSidebarToSessions` | `ctrl+3` | Vault |
+| `switchRightSidebarToFeed` | `ctrl+4` | Feed |
+| `switchRightSidebarToDock` | `ctrl+5` | Dock |
+| `switchRightSidebarToChanges` | `ctrl+6` | Changes |
+
+```json
+{
+  "shortcuts": {
+    "bindings": {
+      "switchRightSidebarToChanges": "ctrl+6"
+    }
+  }
+}
+```

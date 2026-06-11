@@ -13,9 +13,15 @@ final class RightSidebarToolPanel: Panel, ObservableObject {
     private weak var workspace: Workspace?
     private weak var fileExplorerContainerView: FileExplorerContainerView?
     private weak var sessionIndexFocusAnchorView: RightSidebarToolFocusAnchorView?
+    private weak var changesFocusAnchorView: RightSidebarToolFocusAnchorView?
     private var fileExplorerStoreStorage: FileExplorerStore?
     private var fileExplorerStateStorage: FileExplorerState?
     private var sessionIndexStoreStorage: SessionIndexStore?
+    /// Registry-owned Changes store attached while this pane is open
+    /// (`.changes` mode only). Attach in `reattach(to:)`, detach in `close()`.
+    /// Published so the hosted view re-resolves after cross-window reattach.
+    @Published private(set) var gitChangesStoreStorage: GitChangesStore?
+    private var gitChangesAttachedWorkspaceId: UUID?
     private var workspaceObservationCancellable: AnyCancellable?
 
     init(workspace: Workspace, mode: RightSidebarMode) {
@@ -61,6 +67,9 @@ final class RightSidebarToolPanel: Panel, ObservableObject {
 
     func reattach(to workspace: Workspace) {
         self.workspace = workspace
+        if mode == .changes {
+            attachGitChangesObserver(to: workspace)
+        }
         observeWorkspaceRootChanges(workspace)
         syncWorkspaceRoot(from: workspace)
     }
@@ -73,17 +82,61 @@ final class RightSidebarToolPanel: Panel, ObservableObject {
         sessionIndexFocusAnchorView = anchor
     }
 
+    fileprivate func attachChangesFocusAnchor(_ anchor: RightSidebarToolFocusAnchorView?) {
+        changesFocusAnchorView = anchor
+    }
+
     func syncWorkspaceRoot(from workspace: Workspace) {
         switch mode {
         case .files, .find:
             guard let store = fileExplorerStoreStorage else { return }
             syncFileExplorerRoot(from: workspace, store: store)
+        case .changes:
+            // Root updates flow into the registry-owned store directly; the
+            // observer registration itself only changes in reattach/close.
+            gitChangesStoreStorage?.setWorkspaceRoot(.forWorkspace(workspace))
         case .sessions:
             guard let store = sessionIndexStoreStorage else { return }
             syncSessionIndexRoot(from: workspace, store: store)
         case .feed, .dock:
             break
         }
+    }
+
+    /// Attaches this pane as one visible observer of the workspace's Changes
+    /// store, releasing any registration held against a previous workspace
+    /// (cross-window surface transfer re-runs `reattach(to:)`).
+    private func attachGitChangesObserver(to workspace: Workspace) {
+        guard gitChangesAttachedWorkspaceId != workspace.id else {
+            gitChangesStoreStorage?.setWorkspaceRoot(.forWorkspace(workspace))
+            return
+        }
+        detachGitChangesObserverIfNeeded()
+        guard let tabManager = resolvedTabManager(for: workspace) else { return }
+        gitChangesStoreStorage = tabManager.attachGitChangesObserver(
+            workspaceId: workspace.id,
+            root: .forWorkspace(workspace)
+        )
+        gitChangesAttachedWorkspaceId = workspace.id
+    }
+
+    private func detachGitChangesObserverIfNeeded() {
+        guard let workspaceId = gitChangesAttachedWorkspaceId else { return }
+        gitChangesAttachedWorkspaceId = nil
+        gitChangesStoreStorage = nil
+        // Resolve by the *attached* workspace id first: during a cross-window
+        // reattach `workspace` already points at the destination, whose
+        // TabManager may differ from the one holding this registration.
+        let manager = AppDelegate.shared?.tabManagerFor(tabId: workspaceId)
+            ?? workspace.flatMap { resolvedTabManager(for: $0) }
+            ?? AppDelegate.shared?.tabManager
+        manager?.detachGitChangesObserver(workspaceId: workspaceId)
+    }
+
+    private func resolvedTabManager(for workspace: Workspace) -> TabManager? {
+        workspace.owningTabManager
+            ?? AppDelegate.shared?.tabManagerFor(tabId: workspace.id)
+            ?? AppDelegate.shared?.tabManager
     }
 
     func openFilePreview(_ filePath: String) {
@@ -124,8 +177,10 @@ final class RightSidebarToolPanel: Panel, ObservableObject {
     func close() {
         fileExplorerContainerView = nil
         sessionIndexFocusAnchorView = nil
+        changesFocusAnchorView = nil
         fileExplorerStoreStorage?.applyWorkspaceRoot(.none)
         sessionIndexStoreStorage?.setCurrentDirectoryIfChanged(nil)
+        detachGitChangesObserverIfNeeded()
         workspaceObservationCancellable = nil
     }
 
@@ -135,6 +190,10 @@ final class RightSidebarToolPanel: Panel, ObservableObject {
             _ = fileExplorerContainerView?.focusOutline()
         case .find:
             _ = fileExplorerContainerView?.focusSearchField()
+        case .changes:
+            guard let anchor = changesFocusAnchorView,
+                  let window = anchor.window else { return }
+            _ = window.makeFirstResponder(anchor)
         case .sessions:
             guard let anchor = sessionIndexFocusAnchorView,
                   let window = anchor.window else { return }
@@ -157,6 +216,9 @@ final class RightSidebarToolPanel: Panel, ObservableObject {
         switch mode {
         case .files, .find:
             guard fileExplorerContainerView?.ownsKeyboardFocus(responder) == true else { return nil }
+            return .panel
+        case .changes:
+            guard changesFocusAnchorView?.ownsKeyboardFocus(responder) == true else { return nil }
             return .panel
         case .sessions:
             guard sessionIndexFocusAnchorView?.ownsKeyboardFocus(responder) == true else { return nil }
@@ -276,6 +338,19 @@ struct RightSidebarToolPanelView: View {
                 placement: .pane,
                 onFocus: requestPanelFocusIfNeeded,
                 onContainerChange: panel.attachFileExplorerContainer
+            )
+        case .changes:
+            GitChangesPanelHostView(
+                store: panel.gitChangesStoreStorage,
+                onOpenFile: { file in
+                    // TODO(U3): open the branch diff viewer scrolled to
+                    // `file.path` (bundled CLI `diff --branch --file <path>`).
+                    _ = file
+                }
+            )
+            .background(
+                RightSidebarToolFocusAnchor(onViewChange: panel.attachChangesFocusAnchor)
+                    .frame(width: 0, height: 0)
             )
         case .sessions:
             SessionIndexView(

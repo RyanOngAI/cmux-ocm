@@ -1095,6 +1095,11 @@ struct ContentView: View {
     @StateObject private var fileExplorerStore = FileExplorerStore()
     @StateObject private var sessionIndexStore = SessionIndexStore()
     @StateObject private var selectedWorkspaceDirectoryObserver = SelectedWorkspaceDirectoryObserver()
+    /// Registry-owned Changes store currently attached for this window's
+    /// sidebar (nil while the Changes tab is not visible). Attach/detach is
+    /// strictly paired through `syncGitChangesObserver()`.
+    @State private var gitChangesStore: GitChangesStore?
+    @State private var gitChangesAttachedWorkspaceId: UUID?
     @State private var commandPaletteOverlayRenderModel = CommandPaletteOverlayRenderModel()
     @State private var backgroundWorkspacePrimeCoordinator = BackgroundWorkspacePrimeCoordinator()
     @State private var fileExplorerWidth: CGFloat = 220
@@ -2257,6 +2262,7 @@ struct ContentView: View {
             fileExplorerStore: fileExplorerStore,
             fileExplorerState: fileExplorerState,
             sessionIndexStore: sessionIndexStore,
+            gitChangesStore: gitChangesStore,
             titlebarHeight: RightSidebarChromeMetrics.titlebarHeight,
             workspaceId: tabManager.selectedTabId,
             onResumeSession: { entry in
@@ -2264,6 +2270,11 @@ struct ContentView: View {
             },
             onOpenFilePreview: { filePath in
                 openFilePreviewFromSidebar(filePath: filePath)
+            },
+            onOpenChangedFile: { file in
+                // TODO(U3): open the branch diff viewer scrolled to `file.path`
+                // (bundled CLI `diff --branch --file <path>` launcher).
+                _ = file
             },
             onOpenAsPane: { mode in
                 openRightSidebarToolPane(mode)
@@ -2666,7 +2677,42 @@ struct ContentView: View {
         )
     }
 
+    /// Keeps the sidebar's Changes-panel observer registration in sync with
+    /// visibility (sidebar shown + `.changes` mode), the selected workspace,
+    /// and its root (cwd / remote transitions). Called from the same sites
+    /// that drive `syncFileExplorerDirectory()` — the Changes store attaches
+    /// through TabManager's registry rather than the file-explorer sync path
+    /// (see `FileExplorerRootSyncPolicy`).
+    private func syncGitChangesObserver() {
+        let visibleTab: Workspace? = (fileExplorerState.isVisible && fileExplorerState.mode == .changes)
+            ? tabManager.tabs.first(where: { $0.id == tabManager.selectedTabId })
+            : nil
+        guard let tab = visibleTab else {
+            detachGitChangesObserverIfNeeded()
+            return
+        }
+        let root = GitChangesWorkspaceRoot.forWorkspace(tab)
+        if gitChangesAttachedWorkspaceId == tab.id, let store = gitChangesStore {
+            store.setWorkspaceRoot(root)
+            return
+        }
+        detachGitChangesObserverIfNeeded()
+        gitChangesStore = tabManager.attachGitChangesObserver(workspaceId: tab.id, root: root)
+        gitChangesAttachedWorkspaceId = tab.id
+    }
+
+    private func detachGitChangesObserverIfNeeded() {
+        guard let workspaceId = gitChangesAttachedWorkspaceId else { return }
+        tabManager.detachGitChangesObserver(workspaceId: workspaceId)
+        gitChangesAttachedWorkspaceId = nil
+        gitChangesStore = nil
+    }
+
     private func syncFileExplorerDirectory() {
+        // The Changes panel piggybacks on the same triggers (visibility, mode,
+        // workspace/cwd/remote changes) but attaches via TabManager's registry.
+        syncGitChangesObserver()
+
         guard let selectedId = tabManager.selectedTabId,
               let tab = tabManager.tabs.first(where: { $0.id == selectedId }) else {
             // No selection means we have no local cwd to scope by; clear so the
@@ -2838,6 +2884,9 @@ struct ContentView: View {
             selectedWorkspaceDirectoryObserver.wire(tabManager: tabManager)
             tabManager.applyWindowBackgroundForSelectedTab()
             reconcileMountedWorkspaceIds()
+            // Covers launch with the sidebar already open in Changes mode,
+            // before the first directory-generation tick.
+            syncGitChangesObserver()
             previousSelectedWorkspaceId = tabManager.selectedTabId
             installSidebarResizerPointerMonitorIfNeeded()
             let restoredWidth = normalizedSidebarWidth(sidebarState.persistedWidth)
@@ -3432,6 +3481,9 @@ struct ContentView: View {
                 sidebarDragStartWidth = nil
             }
             removeSidebarResizerPointerMonitor()
+            // Window content teardown (window closed): release this window's
+            // Changes-panel observer so the store can suspend at zero observers.
+            detachGitChangesObserverIfNeeded()
         })
 
         view = AnyView(view.background(WindowAccessor(refreshID: appearance.appKitWindowMutationID) { [appearance] window in

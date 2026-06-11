@@ -12,6 +12,7 @@ private func rightSidebarDebugResponder(_ responder: NSResponder?) -> String {
 nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
     case files
     case find
+    case changes
     case sessions
     case feed
     case dock
@@ -20,6 +21,7 @@ nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
         switch self {
         case .files: return String(localized: "rightSidebar.mode.files", defaultValue: "Files")
         case .find: return String(localized: "rightSidebar.mode.find", defaultValue: "Find")
+        case .changes: return String(localized: "rightSidebar.mode.changes", defaultValue: "Changes")
         case .sessions: return String(localized: "rightSidebar.mode.sessions", defaultValue: "Vault")
         case .feed: return String(localized: "rightSidebar.mode.feed", defaultValue: "Feed")
         case .dock: return String(localized: "rightSidebar.mode.dock", defaultValue: "Dock")
@@ -30,6 +32,7 @@ nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
         switch self {
         case .files: return "folder"
         case .find: return "magnifyingglass"
+        case .changes: return "plusminus"
         case .sessions: return "books.vertical"
         case .feed: return "dot.radiowaves.left.and.right"
         case .dock: return "dock.rectangle"
@@ -40,6 +43,7 @@ nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
         switch self {
         case .files: return .switchRightSidebarToFiles
         case .find: return .switchRightSidebarToFind
+        case .changes: return .switchRightSidebarToChanges
         case .sessions: return .switchRightSidebarToSessions
         case .feed: return .switchRightSidebarToFeed
         case .dock: return .switchRightSidebarToDock
@@ -48,7 +52,7 @@ nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
 }
 
 extension RightSidebarMode {
-    static let paneModes: [RightSidebarMode] = [.files, .find, .sessions]
+    static let paneModes: [RightSidebarMode] = [.files, .find, .changes, .sessions]
 
     var canOpenAsPane: Bool {
         Self.paneModes.contains(self)
@@ -61,6 +65,12 @@ nonisolated enum FileExplorerRootSyncPolicy {
         switch mode {
         case .files, .find:
             return true
+        case .changes:
+            // Deliberately false: the Changes panel renders GitChangesStore
+            // snapshots attached through TabManager's registry, not the file
+            // explorer tree. Syncing the FileExplorerStore here would burn
+            // git/FS work for a tree the Changes tab never renders.
+            return false
         case .sessions, .feed, .dock:
             return false
         }
@@ -174,10 +184,15 @@ struct RightSidebarPanelView: View {
     @ObservedObject var fileExplorerStore: FileExplorerStore
     @ObservedObject var fileExplorerState: FileExplorerState
     @ObservedObject var sessionIndexStore: SessionIndexStore
+    /// Registry-owned Changes store for the selected workspace; `nil` when no
+    /// workspace is selected. ContentView attaches/detaches it around sidebar
+    /// visibility, mode, and workspace switches.
+    let gitChangesStore: GitChangesStore?
     let titlebarHeight: CGFloat
     let workspaceId: UUID?
     let onResumeSession: ((SessionEntry) -> Void)?
     let onOpenFilePreview: (String) -> Void
+    let onOpenChangedFile: (GitChangedFile) -> Void
     let onOpenAsPane: (RightSidebarMode) -> Void
     let onClose: () -> Void
 
@@ -433,6 +448,8 @@ struct RightSidebarPanelView: View {
                 onOpenFilePreview: onOpenFilePreview,
                 presentation: .find
             )
+        case .changes:
+            GitChangesPanelHostView(store: gitChangesStore, onOpenFile: onOpenChangedFile)
         case .sessions:
             SessionIndexView(store: sessionIndexStore, onResume: onResumeSession)
                 .onAppear {
