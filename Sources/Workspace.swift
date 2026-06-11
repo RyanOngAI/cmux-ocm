@@ -3,6 +3,7 @@ import SwiftUI
 import AppKit
 import Bonsplit
 import CMUXAgentLaunch
+import CmuxGit
 import CmuxSocketControl
 import Combine
 import CryptoKit
@@ -10787,6 +10788,12 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var panelGitBranches: [UUID: SidebarGitBranchState] = [:]
     @Published var pullRequest: SidebarPullRequestState?
     @Published var panelPullRequests: [UUID: SidebarPullRequestState] = [:]
+    /// Per-panel aggregate CI check state for the panel's tracked PR (stage-2b
+    /// GraphQL probe), consumed by the Changes panel PR header. Deliberately
+    /// EXCLUDED from the sidebar observation publishers — see
+    /// `WorkspaceSidebarObservation.swift` — so CI flaps never invalidate
+    /// left-sidebar rows (#2586 hazard family).
+    @Published var pullRequestCheckStatesByPanel: [UUID: PullRequestCheckState] = [:]
     @Published var surfaceListeningPorts: [UUID: [Int]] = [:]
     var agentListeningPorts: [Int] = []
     @Published var remoteConfiguration: WorkspaceRemoteConfiguration?
@@ -12810,6 +12817,9 @@ final class Workspace: Identifiable, ObservableObject {
             if panelPullRequests[panelId] != nil {
                 panelPullRequests.removeValue(forKey: panelId)
             }
+            if pullRequestCheckStatesByPanel[panelId] != nil {
+                pullRequestCheckStatesByPanel.removeValue(forKey: panelId)
+            }
             if panelId == focusedPanelId, pullRequest != nil {
                 pullRequest = nil
             }
@@ -12825,6 +12835,9 @@ final class Workspace: Identifiable, ObservableObject {
         }
         if panelPullRequests[panelId] != nil {
             panelPullRequests.removeValue(forKey: panelId)
+        }
+        if pullRequestCheckStatesByPanel[panelId] != nil {
+            pullRequestCheckStatesByPanel.removeValue(forKey: panelId)
         }
         if panelId == focusedPanelId {
             if gitBranch != nil {
@@ -12884,14 +12897,35 @@ final class Workspace: Identifiable, ObservableObject {
         if panelPullRequests[panelId] != nil {
             panelPullRequests.removeValue(forKey: panelId)
         }
+        if pullRequestCheckStatesByPanel[panelId] != nil {
+            pullRequestCheckStatesByPanel.removeValue(forKey: panelId)
+        }
         if panelId == focusedPanelId, pullRequest != nil {
             pullRequest = nil
+        }
+    }
+
+    /// Updates (or clears, when `checkState` is nil) the panel's PR CI check
+    /// state. Writes only on change; the property is intentionally outside the
+    /// sidebar observation stream.
+    func updatePanelPullRequestCheckState(panelId: UUID, checkState: PullRequestCheckState?) {
+        if let checkState {
+            if pullRequestCheckStatesByPanel[panelId] != checkState {
+                pullRequestCheckStatesByPanel[panelId] = checkState
+            }
+        } else if pullRequestCheckStatesByPanel[panelId] != nil {
+            pullRequestCheckStatesByPanel.removeValue(forKey: panelId)
         }
     }
 
     func clearSidebarPullRequestMetadata() {
         if !panelPullRequests.isEmpty {
             panelPullRequests.removeAll()
+        }
+        // Mirror the PR-metadata clear for check state: with PR polling
+        // disabled the Changes header must hide, never show stale CI color.
+        if !pullRequestCheckStatesByPanel.isEmpty {
+            pullRequestCheckStatesByPanel.removeAll()
         }
         if pullRequest != nil {
             pullRequest = nil

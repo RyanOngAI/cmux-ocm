@@ -5,6 +5,9 @@ import Foundation
 struct WorkspacePullRequestRESTItem: Decodable, Sendable {
     struct Ref: Decodable, Sendable {
         let ref: String
+        /// The ref's commit SHA (REST `head.sha`); correlates REST PRs with
+        /// per-head-SHA check states from the stage-2b GraphQL probe.
+        let sha: String?
     }
 
     let number: Int

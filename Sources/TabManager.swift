@@ -1087,6 +1087,11 @@ class TabManager: ObservableObject {
     private nonisolated static let workspacePullRequestRepoCachePruneLifetime: TimeInterval = 60
     private nonisolated static let workspacePullRequestPollJitterFraction = 0.10
     private nonisolated static let workspacePullRequestRefreshBatchLimit = 3
+    /// When the GraphQL checks probe reports fewer remaining rate-limit points
+    /// than this, PR polling backs off to ``checksLowRateLimitPollInterval``.
+    private nonisolated static let checksLowRateLimitThreshold = 200
+    /// Poll floor while the GraphQL rate-limit budget is low.
+    private nonisolated static let checksLowRateLimitPollInterval: TimeInterval = 300
     private nonisolated static let mobileHostBackgroundWorkDeferralInterval: TimeInterval = 2.0
     private nonisolated static let mobileHostBackgroundWorkQuietInterval: TimeInterval = 60.0
     @Published var selectedTabId: UUID? {
@@ -1962,6 +1967,19 @@ class TabManager: ObservableObject {
             workspacePullRequestRepoCacheBySlug[repoSlug] = cacheEntry
         }
 
+        // GraphQL budget guard: when the checks probe reports a low
+        // `rateLimit.remaining`, stretch every next-poll interval. Note the
+        // probe transport surfaces status code + body only, so a 403/429
+        // `Retry-After` header cannot be honored here (documented gap) —
+        // `rateLimit.remaining` is the backoff signal.
+        let checksRateLimitLow = repoResults.values.contains { repoResult in
+            guard case .success(let cacheEntry, _, _) = repoResult,
+                  let remaining = cacheEntry.checksRateLimitRemaining else {
+                return false
+            }
+            return remaining < Self.checksLowRateLimitThreshold
+        }
+
         let requestedKeySet = Set(requestedKeys)
         let resultsByKey = Dictionary(
             uniqueKeysWithValues: results.map {
@@ -2025,6 +2043,14 @@ class TabManager: ObservableObject {
                     branch: resolvedPullRequest.branch,
                     isStale: false
                 )
+                // Stage 2b check state (Changes panel header). A nil state —
+                // including the stale-green guard, where the REST head SHA
+                // moved past every cached check state — clears the published
+                // entry so the header renders neutral, never an old color.
+                workspace.updatePanelPullRequestCheckState(
+                    panelId: result.panelId,
+                    checkState: resolvedPullRequest.checkState
+                )
             case .notFound:
                 workspacePullRequestTransientFailureCountByKey[key] = 0
                 workspacePullRequestLastTerminalStateRefreshAtByKey.removeValue(forKey: key)
@@ -2060,7 +2086,8 @@ class TabManager: ObservableObject {
                 panelId: result.panelId,
                 now: now,
                 resolution: result.resolution,
-                countsAsTerminalSweep: countsAsTerminalSweep
+                countsAsTerminalSweep: countsAsTerminalSweep,
+                checksRateLimitLow: checksRateLimitLow
             )
             if rerunPending {
                 workspacePullRequestNextPollAtByKey[key] = .distantPast
@@ -2095,7 +2122,8 @@ class TabManager: ObservableObject {
         panelId: UUID,
         now: Date,
         resolution: WorkspacePullRequestRefreshResult.Resolution,
-        countsAsTerminalSweep: Bool
+        countsAsTerminalSweep: Bool,
+        checksRateLimitLow: Bool
     ) {
         if countsAsTerminalSweep {
             workspacePullRequestLastTerminalStateRefreshAtByKey[key] = now
@@ -2122,9 +2150,25 @@ class TabManager: ObservableObject {
         }
 
         workspacePullRequestLastTerminalStateRefreshAtByKey.removeValue(forKey: key)
-        let baseInterval = isSelectedFocusedPanel(workspace: workspace, panelId: panelId)
+        var baseInterval = isSelectedFocusedPanel(workspace: workspace, panelId: panelId)
             ? Self.selectedPollInterval
             : Self.backgroundPollInterval
+        // CI cadence (R13): while the tracked PR's check rollup is running
+        // (non-terminal) the fast selected cadence stands — the 15s repo
+        // cache is the effective floor. Once the rollup is terminal
+        // (success/failure/error) CI color is stable, so stretch toward the
+        // background interval. Head-SHA changes need no extra hook here: the
+        // workspace git metadata watcher already fires on `.git` ref updates
+        // and schedules an immediate cache-bypassing refresh
+        // ("localGitProbe"/"branchChange"), which re-fetches REST head SHAs
+        // and, via stage 2b, the new SHA's check state.
+        if case .resolved(let resolvedPullRequest) = resolution,
+           resolvedPullRequest.checkState?.rollupState.isTerminal == true {
+            baseInterval = max(baseInterval, Self.backgroundPollInterval)
+        }
+        if checksRateLimitLow {
+            baseInterval = max(baseInterval, Self.checksLowRateLimitPollInterval)
+        }
         workspacePullRequestNextPollAtByKey[key] = now.addingTimeInterval(Self.jitteredPollInterval(base: baseInterval))
     }
 

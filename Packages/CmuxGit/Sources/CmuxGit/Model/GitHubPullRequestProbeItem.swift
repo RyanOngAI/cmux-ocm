@@ -20,6 +20,9 @@ public struct GitHubPullRequestProbeItem: Decodable, Equatable, Sendable {
     public let headRefName: String?
     /// The PR's base (target) branch name, if known.
     public let baseRefName: String?
+    /// The PR's head commit SHA (REST `head.sha`), if known. Correlates the
+    /// REST selection with per-head-SHA check states (stage 2b).
+    public let headSHA: String?
 
     /// Creates a probe item.
     public init(
@@ -29,7 +32,8 @@ public struct GitHubPullRequestProbeItem: Decodable, Equatable, Sendable {
         updatedAt: String?,
         mergedAt: String? = nil,
         headRefName: String? = nil,
-        baseRefName: String? = nil
+        baseRefName: String? = nil,
+        headSHA: String? = nil
     ) {
         self.number = number
         self.state = state
@@ -38,5 +42,6 @@ public struct GitHubPullRequestProbeItem: Decodable, Equatable, Sendable {
         self.mergedAt = mergedAt
         self.headRefName = headRefName
         self.baseRefName = baseRefName
+        self.headSHA = headSHA
     }
 }
