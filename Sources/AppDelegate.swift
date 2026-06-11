@@ -966,6 +966,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// Declared outside `#if DEBUG` because process retention is production behavior.
     private var diffViewerProcesses: [Int32: Process] = [:]
 
+    /// Last Changes-panel-launched diff viewer per workspace: surface id plus
+    /// the content identity of the branch diff it rendered. Drives panel reuse
+    /// (relaunch with `--reuse-surface`) and the same-diff in-page jump fast
+    /// path. Stale entries are validated against the live workspace on use.
+    private var changesDiffViewerSessions: [UUID: ChangesDiffViewerSession] = [:]
+    /// Workspaces with a Changes-panel diff CLI launch currently in flight;
+    /// duplicate clicks are dropped instead of stacking splits.
+    private var changesDiffViewerLaunchesInFlight: Set<UUID> = []
+
 #if DEBUG
     private var didSetupJumpUnreadUITest = false
     private var jumpUnreadFocusExpectation: (tabId: UUID, surfaceId: UUID)?
@@ -6135,6 +6144,230 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
             return false
         }
+    }
+
+    /// Content identity of one rendered branch diff. Two Changes-panel clicks
+    /// with equal identities can share an already-open viewer without
+    /// relaunching the CLI: the snapshot rows capture the diff baseline
+    /// (root + base + merge-base) and the changed-file set with line counts.
+    struct ChangesDiffViewerContentIdentity: Equatable {
+        let repoRootPath: String?
+        let branch: String?
+        let baseRef: String?
+        let mergeBase: String?
+        let files: [GitChangedFile]
+
+        init(snapshot: GitChangesSnapshot) {
+            repoRootPath = snapshot.repoRootPath
+            branch = snapshot.branch
+            baseRef = snapshot.baseRef
+            mergeBase = snapshot.mergeBase
+            files = snapshot.files
+        }
+    }
+
+    private struct ChangesDiffViewerSession {
+        var surfaceId: UUID
+        var identity: ChangesDiffViewerContentIdentity?
+    }
+
+    /// Opens the branch diff viewer for a Changes-panel row click, scrolled to
+    /// `filePath` (repo-root-relative). Reuse rules, in order:
+    /// 1. A previously launched viewer is alive, still shows a diff-viewer URL,
+    ///    and the snapshot identity is unchanged → jump in place via
+    ///    `window.cmuxDiffViewerScrollToFile` (no CLI relaunch) and focus it.
+    /// 2. The viewer is alive but the diff content changed → relaunch the CLI
+    ///    with `--reuse-surface` so the panel navigates instead of splitting.
+    /// 3. No live viewer → launch a fresh split.
+    @discardableResult
+    func openBranchDiffViewer(
+        workspaceId: UUID,
+        filePath: String,
+        snapshot: GitChangesSnapshot?
+    ) -> Bool {
+        guard let manager = tabManagerFor(tabId: workspaceId),
+              let workspace = manager.tabs.first(where: { $0.id == workspaceId }),
+              let cliURL = Bundle.main.resourceURL?.appendingPathComponent("bin/cmux"),
+              FileManager.default.isExecutableFile(atPath: cliURL.path) else {
+            return false
+        }
+
+        let identity = snapshot.map(ChangesDiffViewerContentIdentity.init(snapshot:))
+        var reuseSurfaceId: UUID?
+        if let session = changesDiffViewerSessions[workspaceId] {
+            if let panel = workspace.browserPanel(for: session.surfaceId),
+               panel.diffViewerSessionComponents() != nil {
+                if let identity, session.identity == identity {
+                    scrollChangesDiffViewer(panel: panel, in: workspace, toFile: filePath)
+                    return true
+                }
+                reuseSurfaceId = session.surfaceId
+            } else {
+                // Closed or navigated away: next launch opens a fresh split.
+                changesDiffViewerSessions.removeValue(forKey: workspaceId)
+            }
+        }
+
+        // One launch at a time per workspace; rapid re-clicks would otherwise
+        // race the surface-id capture and stack extra splits.
+        guard !changesDiffViewerLaunchesInFlight.contains(workspaceId) else {
+            return true
+        }
+
+        let socketPath = TerminalController.shared.activeSocketPath(
+            preferredPath: SocketControlSettings.socketPath()
+        )
+        let cwd = snapshot?.repoRootPath
+            ?? workspace.resolvedWorkingDirectory()
+            ?? FileManager.default.homeDirectoryForCurrentUser.path
+        return launchChangesDiffViewerProcess(
+            cliURL: cliURL,
+            socketPath: socketPath,
+            cwd: cwd,
+            workspaceId: workspaceId,
+            sourceSurfaceId: workspace.focusedPanelId,
+            filePath: filePath,
+            reuseSurfaceId: reuseSurfaceId,
+            identity: identity
+        )
+    }
+
+    /// Same-diff fast path: scroll the already-rendered viewer to the file via
+    /// the page's `window.cmuxDiffViewerScrollToFile` bridge and focus it.
+    private func scrollChangesDiffViewer(
+        panel: BrowserPanel,
+        in workspace: Workspace,
+        toFile filePath: String
+    ) {
+        if let pathLiteral = Self.changesDiffViewerJSONStringLiteral(filePath) {
+            let script = "(() => { const jump = window.cmuxDiffViewerScrollToFile; return typeof jump === \"function\" ? jump(\(pathLiteral)) === true : false; })()"
+            Task { @MainActor in
+                _ = try? await panel.evaluateJavaScript(script)
+            }
+        }
+        workspace.focusPanel(panel.id)
+    }
+
+    private static func changesDiffViewerJSONStringLiteral(_ value: String) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: [value]),
+              let text = String(data: data, encoding: .utf8),
+              text.count >= 2 else {
+            return nil
+        }
+        return String(text.dropFirst().dropLast())
+    }
+
+    @discardableResult
+    private func launchChangesDiffViewerProcess(
+        cliURL: URL,
+        socketPath: String,
+        cwd: String,
+        workspaceId: UUID,
+        sourceSurfaceId: UUID?,
+        filePath: String,
+        reuseSurfaceId: UUID?,
+        identity: ChangesDiffViewerContentIdentity?
+    ) -> Bool {
+        let process = Process()
+        process.executableURL = cliURL
+        var arguments = [
+            "--socket", socketPath,
+            "--id-format", "uuids",
+            "diff",
+            "--branch",
+            "--file", filePath,
+            "--cwd", cwd,
+            "--workspace", workspaceId.uuidString,
+            "--focus", "true",
+        ]
+        if let sourceSurfaceId {
+            arguments.append(contentsOf: ["--surface", sourceSurfaceId.uuidString])
+        }
+        if let reuseSurfaceId {
+            arguments.append(contentsOf: ["--reuse-surface", reuseSurfaceId.uuidString])
+        }
+        process.arguments = arguments
+        process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        var environment = ProcessInfo.processInfo.environment
+        environment["CMUX_SOCKET_PATH"] = socketPath
+        environment["CMUX_BUNDLED_CLI_PATH"] = cliURL.path
+        environment["CMUX_WORKSPACE_ID"] = workspaceId.uuidString
+        environment.removeValue(forKey: "CMUX_SOCKET")
+        environment.removeValue(forKey: "CMUX_SURFACE_ID")
+        process.environment = environment
+        process.standardInput = FileHandle.nullDevice
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        let outputCollector = ProcessOutputCollector(stdout: stdoutPipe, stderr: stderrPipe)
+        outputCollector.start()
+        process.terminationHandler = { terminatedProcess in
+            let output = outputCollector.finish()
+            let processIdentifier = terminatedProcess.processIdentifier
+            let terminationStatus = terminatedProcess.terminationStatus
+            let launchedSurfaceId = terminationStatus == 0
+                ? Self.changesDiffViewerSurfaceId(fromCLIOutput: output, reuseSurfaceId: reuseSurfaceId)
+                : nil
+            Task { @MainActor in
+                guard let delegate = AppDelegate.shared else { return }
+                delegate.diffViewerProcesses.removeValue(forKey: processIdentifier)
+                delegate.changesDiffViewerLaunchesInFlight.remove(workspaceId)
+                if let launchedSurfaceId {
+                    delegate.changesDiffViewerSessions[workspaceId] = ChangesDiffViewerSession(
+                        surfaceId: launchedSurfaceId,
+                        identity: identity
+                    )
+                }
+                guard terminationStatus != 0 else { return }
+#if DEBUG
+                // Log only non-sensitive metadata: the child's stdout/stderr can echo
+                // repo paths and file contents, so report a byte count, not the text.
+                cmuxDebugLog("openBranchDiffViewer exited status=\(terminationStatus) outputBytes=\(output.utf8.count)")
+#endif
+                NSSound.beep()
+            }
+        }
+
+        do {
+            changesDiffViewerLaunchesInFlight.insert(workspaceId)
+            try process.run()
+            let processIdentifier = process.processIdentifier
+            diffViewerProcesses[processIdentifier] = process
+            if !process.isRunning {
+                diffViewerProcesses.removeValue(forKey: processIdentifier)
+            }
+#if DEBUG
+            cmuxDebugLog("openBranchDiffViewer pid=\(process.processIdentifier) reuse=\(reuseSurfaceId != nil)")
+#endif
+            return true
+        } catch {
+            changesDiffViewerLaunchesInFlight.remove(workspaceId)
+            outputCollector.cancel()
+#if DEBUG
+            cmuxDebugLog("openBranchDiffViewer failed errorType=\(type(of: error))")
+#endif
+            return false
+        }
+    }
+
+    /// Extracts the viewer surface UUID from the diff CLI's
+    /// `OK surface=<uuid> pane=<uuid>` stdout (`--id-format uuids`). Falls back
+    /// to the requested reuse surface when parsing fails, since a successful
+    /// reuse keeps the same surface.
+    private nonisolated static func changesDiffViewerSurfaceId(
+        fromCLIOutput output: String,
+        reuseSurfaceId: UUID?
+    ) -> UUID? {
+        for line in output.split(separator: "\n") where line.hasPrefix("OK ") {
+            for token in line.split(separator: " ") where token.hasPrefix("surface=") {
+                if let uuid = UUID(uuidString: String(token.dropFirst("surface=".count))) {
+                    return uuid
+                }
+            }
+        }
+        return reuseSurfaceId
     }
 
     func allMainWindowTabManagersForDebug() -> [TabManager] {

@@ -11678,6 +11678,35 @@ class TerminalController {
             v2MaybeFocusWindow(for: tabManager)
             v2MaybeSelectWorkspace(tabManager, workspace: ws)
 
+            // Reuse fast path: when the caller names an existing browser surface
+            // in this workspace (e.g. the Changes panel re-targeting its diff
+            // viewer), navigate it in place instead of stacking a new split.
+            // Missing/stale ids fall through to the normal split path.
+            if let reuseSurfaceId = v2UUID(params, "reuse_surface_id"),
+               let url,
+               let reusePanel = ws.browserPanel(for: reuseSurfaceId) {
+                reusePanel.navigateSmart(url.absoluteString)
+                if v2FocusAllowed(requested: v2Bool(params, "focus") ?? false) {
+                    ws.focusPanel(reusePanel.id)
+                }
+                let reusePaneUUID = ws.paneId(forPanelId: reusePanel.id)?.id
+                let windowId = v2ResolveWindowId(tabManager: tabManager)
+                result = .ok([
+                    "window_id": v2OrNull(windowId?.uuidString),
+                    "window_ref": v2Ref(kind: .window, uuid: windowId),
+                    "workspace_id": ws.id.uuidString,
+                    "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                    "pane_id": v2OrNull(reusePaneUUID?.uuidString),
+                    "pane_ref": v2Ref(kind: .pane, uuid: reusePaneUUID),
+                    "surface_id": reusePanel.id.uuidString,
+                    "surface_ref": v2Ref(kind: .surface, uuid: reusePanel.id),
+                    "created_split": false,
+                    "placement_strategy": "reuse_surface",
+                    "reused_surface": true
+                ])
+                return
+            }
+
             let sourceSurfaceId = v2UUID(params, "surface_id") ?? ws.focusedPanelId
             guard let sourceSurfaceId else {
                 result = .err(code: "not_found", message: "No focused surface to split", data: nil)

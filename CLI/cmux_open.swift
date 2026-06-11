@@ -163,6 +163,10 @@ extension CMUXCLI {
         var cwd: String?
         var branchBase: String?
         var source: DiffSource?
+        /// Repo-root-relative file the viewer scrolls to on first render.
+        var file: String?
+        /// Existing browser surface to navigate instead of opening a new split.
+        var reuseSurface: String?
         var inputs: [String] = []
     }
 
@@ -184,6 +188,9 @@ extension CMUXCLI {
         var surfaceId: String?
         var repoRoot: String?
         var branchBaseRef: String?
+        /// Repo-root-relative file the viewer scrolls to on first render
+        /// (`--file`). Carried only by the page for the requested source.
+        var initialFilePath: String? = nil
     }
 
     private struct DiffViewerWriteResult {
@@ -839,7 +846,8 @@ extension CMUXCLI {
             workspaceId: nil,
             surfaceId: nil,
             repoRoot: nil,
-            branchBaseRef: parsedArgs.branchBase
+            branchBaseRef: parsedArgs.branchBase,
+            initialFilePath: parsedArgs.file
         )
         if let cwd = parsedArgs.cwd {
             diffSourceContext.repoRoot = try gitRepoRoot(startingAt: resolvePath(cwd))
@@ -860,6 +868,7 @@ extension CMUXCLI {
             )
             sourceContext.repoRoot = diffSourceContext.repoRoot
             sourceContext.branchBaseRef = diffSourceContext.branchBaseRef
+            sourceContext.initialFilePath = diffSourceContext.initialFilePath
             diffSourceContext = sourceContext
             workspaceHandle = sourceContext.workspaceId ?? workspaceHandle
             surfaceHandle = sourceContext.surfaceId ?? surfaceHandle
@@ -898,6 +907,18 @@ extension CMUXCLI {
         if let windowHandle { params["window_id"] = windowHandle }
         if let workspaceHandle { params["workspace_id"] = workspaceHandle }
         if let surfaceHandle { params["surface_id"] = surfaceHandle }
+        if let reuseSurface = parsedArgs.reuseSurface {
+            // Stale/unknown handles still flow through as-is: the app treats an
+            // unresolvable reuse surface as "open a fresh split" rather than
+            // failing the whole diff command.
+            let normalizedReuseSurface = (try? normalizeSurfaceHandle(
+                reuseSurface,
+                client: activeClient,
+                workspaceHandle: workspaceHandle,
+                windowHandle: windowHandle
+            )) ?? nil
+            params["reuse_surface_id"] = normalizedReuseSurface ?? reuseSurface
+        }
 
         let payload = try activeClient.sendV2(method: "browser.open_split", params: params)
 
@@ -1202,6 +1223,16 @@ extension CMUXCLI {
                     parsed.branchBase = try openOptionValue(commandArgs, index: index, name: arg)
                     index += 2
                     continue
+                case "--file":
+                    // The next token is consumed as a literal value even when it
+                    // is flag-shaped (paths can legitimately start with "-").
+                    parsed.file = try openOptionValue(commandArgs, index: index, name: arg)
+                    index += 2
+                    continue
+                case "--reuse-surface":
+                    parsed.reuseSurface = try openOptionValue(commandArgs, index: index, name: arg)
+                    index += 2
+                    continue
                 case "--source":
                     let rawSource = try openOptionValue(commandArgs, index: index, name: arg)
                     guard let source = DiffSource(rawValue: rawSource) else {
@@ -1228,7 +1259,7 @@ extension CMUXCLI {
                     continue
                 default:
                     if arg.hasPrefix("-"), arg != "-" {
-                        throw CLIError(message: "diff: unknown flag '\(arg)'. Usage: cmux diff [patch-file|-] [--source <unstaged|staged|branch|last-turn>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--cwd <path>] [--base <ref>] [--focus true|false] [--no-focus] [--title <text>] [--layout split|unified] [--font-size <points>]")
+                        throw CLIError(message: "diff: unknown flag '\(arg)'. Usage: cmux diff [patch-file|-] [--source <unstaged|staged|branch|last-turn>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--cwd <path>] [--base <ref>] [--file <repo-relative-path>] [--reuse-surface <surface-id>] [--focus true|false] [--no-focus] [--title <text>] [--layout split|unified] [--font-size <points>]")
                     }
                 }
             }
@@ -3103,6 +3134,7 @@ extension CMUXCLI {
             appearance: appearance,
             sourceOptions: [],
             repoRoot: context.repoRoot,
+            initialFile: context.initialFilePath,
             runtime: runtime
         )
         let assets = try ensureDiffViewerAssets(nextTo: viewerFileURL, runtime: runtime)
@@ -3535,6 +3567,9 @@ extension CMUXCLI {
                 } else {
                     pageContext.branchBaseRef = nil
                 }
+                // The initial scroll target applies only to the requested page;
+                // switching sources should not re-trigger it.
+                pageContext.initialFilePath = nil
                 let viewerURL: URL
                 if let sourceURL = urls[source] {
                     viewerURL = sourceURL
@@ -3630,6 +3665,7 @@ extension CMUXCLI {
             }
             var pageContext = selectedContext
             pageContext.branchBaseRef = option.ref
+            pageContext.initialFilePath = nil
             try writeDiffViewerStatusHTML(
                 to: url,
                 title: option.label,
@@ -3685,6 +3721,7 @@ extension CMUXCLI {
                 baseOptions: selectedSource == .branch ? baseOptions : [],
                 repoRoot: repoRoot,
                 branchBaseRef: selectedSource == .branch ? selectedContext.branchBaseRef : nil,
+                initialFile: selectedContext.initialFilePath,
                 runtime: target.runtime
             )
         } else if let selectedEmptyMessage {
@@ -3990,6 +4027,7 @@ extension CMUXCLI {
             baseOptions: baseOptions,
             repoRoot: pageContext.repoRoot,
             branchBaseRef: source == .branch ? pageContext.branchBaseRef : nil,
+            initialFile: pageContext.initialFilePath,
             runtime: sourceSet.runtime
         )
         return DiffViewerDeferredCompletion(
@@ -5610,6 +5648,7 @@ extension CMUXCLI {
         baseOptions: [DiffViewerSourceOption] = [],
         repoRoot: String? = nil,
         branchBaseRef: String? = nil,
+        initialFile: String? = nil,
         statusMessage: String? = nil,
         statusIsError: Bool = false,
         pollForReplacement: Bool = false,
@@ -5648,6 +5687,9 @@ extension CMUXCLI {
         }
         if let branchBaseRef {
             payload["branchBaseRef"] = branchBaseRef
+        }
+        if let initialFile, !initialFile.isEmpty {
+            payload["initialFile"] = initialFile
         }
         let assets = try ensureDiffViewerAssets(nextTo: viewerURL, runtime: runtime)
         let config: [String: Any] = [
@@ -6108,6 +6150,8 @@ extension CMUXCLI {
           --window <id|ref|index>      Target window
           --cwd, --repo <path>          Git repository or worktree path for git sources
           --base <ref>                  Base ref for --branch (default: origin/HEAD or main)
+          --file <path>                Repo-relative file to scroll into view on first render
+          --reuse-surface <id|ref>     Navigate this existing browser surface instead of opening a new split
           --focus <true|false>         Focus the diff browser split (default: false)
           --no-focus                   Do not focus the opened diff browser split
           --title <text>               Set the diff viewer title to the provided text

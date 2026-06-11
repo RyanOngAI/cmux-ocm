@@ -2272,9 +2272,12 @@ struct ContentView: View {
                 openFilePreviewFromSidebar(filePath: filePath)
             },
             onOpenChangedFile: { file in
-                // TODO(U3): open the branch diff viewer scrolled to `file.path`
-                // (bundled CLI `diff --branch --file <path>` launcher).
-                _ = file
+                guard let workspaceId = tabManager.selectedTabId else { return }
+                AppDelegate.shared?.openBranchDiffViewer(
+                    workspaceId: workspaceId,
+                    filePath: file.path,
+                    snapshot: gitChangesStore?.snapshot
+                )
             },
             onOpenAsPane: { mode in
                 openRightSidebarToolPane(mode)

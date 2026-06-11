@@ -65,6 +65,10 @@ final class RightSidebarToolPanel: Panel, ObservableObject {
     var displayTitle: String { mode.label }
     var displayIcon: String? { mode.symbolName }
 
+    /// Workspace this pane is attached to; the Changes row-click handler uses
+    /// it to target the branch diff viewer launch.
+    var changesWorkspaceId: UUID? { workspace?.id }
+
     func reattach(to workspace: Workspace) {
         self.workspace = workspace
         if mode == .changes {
@@ -343,9 +347,12 @@ struct RightSidebarToolPanelView: View {
             GitChangesPanelHostView(
                 store: panel.gitChangesStoreStorage,
                 onOpenFile: { file in
-                    // TODO(U3): open the branch diff viewer scrolled to
-                    // `file.path` (bundled CLI `diff --branch --file <path>`).
-                    _ = file
+                    guard let workspaceId = panel.changesWorkspaceId else { return }
+                    AppDelegate.shared?.openBranchDiffViewer(
+                        workspaceId: workspaceId,
+                        filePath: file.path,
+                        snapshot: panel.gitChangesStoreStorage?.snapshot
+                    )
                 }
             )
             .background(
