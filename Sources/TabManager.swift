@@ -1231,6 +1231,11 @@ class TabManager: ObservableObject {
     private var workspacePullRequestPollTask: Task<Void, Never>?
     private var workspacePullRequestRefreshTask: Task<Void, Never>?
     private var workspacePullRequestFollowUpShouldBypassRepoCache = false
+    // Per-workspace Changes-panel stores, keyed like the rest of the
+    // per-workspace git machinery. Ref-counted by visible observers
+    // (sidebar tab + pop-out panes across windows); fully suspended at zero.
+    private var gitChangesStoresByWorkspaceId: [UUID: GitChangesStore] = [:]
+    private var gitChangesObserverCountsByWorkspaceId: [UUID: Int] = [:]
 
     @Published private(set) var focusHistoryRevision: UInt64 = 0 {
         didSet {
@@ -1695,6 +1700,56 @@ class TabManager: ObservableObject {
         workspaceGitMetadataWatchersByKey.removeAll()
         workspaceGitMetadataWatcherSourceDirectoryByKey.removeAll()
         workspaceGitMetadataWatcherDescriptorRequestsByKey.removeAll()
+    }
+
+    // MARK: - Git changes store registry (Changes panel data layer)
+
+    /// Attaches one visible observer (sidebar Changes tab or pop-out pane) to
+    /// the workspace's ``GitChangesStore``, lazily creating the store on the
+    /// first attach and resuming it (watchers + an immediate refresh) when the
+    /// observer count goes 0 → 1.
+    @discardableResult
+    func attachGitChangesObserver(
+        workspaceId: UUID,
+        root: GitChangesWorkspaceRoot
+    ) -> GitChangesStore {
+        let store: GitChangesStore
+        if let existing = gitChangesStoresByWorkspaceId[workspaceId] {
+            store = existing
+        } else {
+            store = GitChangesStore(gitMetadataService: gitMetadataService)
+            gitChangesStoresByWorkspaceId[workspaceId] = store
+        }
+        let count = (gitChangesObserverCountsByWorkspaceId[workspaceId] ?? 0) + 1
+        gitChangesObserverCountsByWorkspaceId[workspaceId] = count
+        store.setWorkspaceRoot(root)
+        if count == 1 {
+            store.resume()
+        }
+        return store
+    }
+
+    /// Detaches one visible observer. At zero observers the store is fully
+    /// suspended (watchers torn down, refreshes cancelled) but kept warm so a
+    /// re-attach renders the last snapshot instantly while it refreshes.
+    func detachGitChangesObserver(workspaceId: UUID) {
+        guard let count = gitChangesObserverCountsByWorkspaceId[workspaceId] else { return }
+        if count <= 1 {
+            gitChangesObserverCountsByWorkspaceId.removeValue(forKey: workspaceId)
+            gitChangesStoresByWorkspaceId[workspaceId]?.suspend()
+        } else {
+            gitChangesObserverCountsByWorkspaceId[workspaceId] = count - 1
+        }
+    }
+
+    /// Tears down the workspace's changes store entirely (workspace close or
+    /// detach from this window). Suspends first so watchers and in-flight git
+    /// work stop deterministically before the reference drops.
+    private func teardownGitChangesStore(workspaceId: UUID) {
+        gitChangesObserverCountsByWorkspaceId.removeValue(forKey: workspaceId)
+        if let store = gitChangesStoresByWorkspaceId.removeValue(forKey: workspaceId) {
+            store.suspend()
+        }
     }
 
     private func refreshTrackedWorkspacePullRequestsIfNeeded(
@@ -5313,6 +5368,7 @@ class TabManager: ObservableObject {
         }
         clearWorkspaceGitProbes(workspaceId: workspace.id)
         clearWorkspacePullRequestTracking(workspaceId: workspace.id)
+        teardownGitChangesStore(workspaceId: workspace.id)
         sidebarSelectedWorkspaceIds.remove(workspace.id)
         invalidateFocusHistoryTarget(workspaceId: workspace.id, panelId: nil)
 
@@ -5373,6 +5429,12 @@ class TabManager: ObservableObject {
     func detachWorkspace(tabId: UUID) -> Workspace? {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return nil }
         clearWorkspaceGitProbes(workspaceId: tabId)
+        // Workspace move between windows (AppDelegate.moveWorkspaceToWindow /
+        // moveWorkspaceToNewWindow detach + attach): teardown, not transfer.
+        // The registry is per-TabManager, so the destination window's panels
+        // re-attach through the destination manager and lazily recreate a
+        // fresh store, which re-resolves everything in one refresh.
+        teardownGitChangesStore(workspaceId: tabId)
         sidebarSelectedWorkspaceIds.remove(tabId)
         invalidateFocusHistoryTarget(workspaceId: tabId, panelId: nil)
 
