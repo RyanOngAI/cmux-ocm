@@ -69,6 +69,10 @@ final class RightSidebarToolPanel: Panel, ObservableObject {
     /// it to target the branch diff viewer launch.
     var changesWorkspaceId: UUID? { workspace?.id }
 
+    /// Workspace reference for the Changes PR header (observed at the hosted
+    /// panel's root for PR metadata, CI check state, and agent presence).
+    var changesWorkspace: Workspace? { workspace }
+
     func reattach(to workspace: Workspace) {
         self.workspace = workspace
         if mode == .changes {
@@ -346,6 +350,7 @@ struct RightSidebarToolPanelView: View {
         case .changes:
             GitChangesPanelHostView(
                 store: panel.gitChangesStoreStorage,
+                workspace: panel.changesWorkspace,
                 onOpenFile: { file in
                     guard let workspaceId = panel.changesWorkspaceId else { return }
                     AppDelegate.shared?.openBranchDiffViewer(

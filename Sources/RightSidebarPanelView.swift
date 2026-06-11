@@ -449,7 +449,11 @@ struct RightSidebarPanelView: View {
                 presentation: .find
             )
         case .changes:
-            GitChangesPanelHostView(store: gitChangesStore, onOpenFile: onOpenChangedFile)
+            GitChangesPanelHostView(
+                store: gitChangesStore,
+                workspace: tabManager.tabs.first(where: { $0.id == workspaceId }),
+                onOpenFile: onOpenChangedFile
+            )
         case .sessions:
             SessionIndexView(store: sessionIndexStore, onResume: onResumeSession)
                 .onAppear {

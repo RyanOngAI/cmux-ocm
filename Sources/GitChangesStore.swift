@@ -73,6 +73,11 @@ struct GitChangesSnapshot: Equatable, Sendable {
     let totalAddedLines: Int
     /// Sum of all non-nil ``GitChangedFile/deletedLines``.
     let totalDeletedLines: Int
+    /// True when the repository has a resolvable GitHub `owner/name` remote
+    /// slug (`GitMetadataService.repositorySlugs`, read from `config` with no
+    /// subprocess). Resolved alongside the base ref (`.git`-event cadence).
+    /// The PR header is hidden for non-GitHub/absent remotes (R18).
+    let hasGitHubRemote: Bool
 
     init(
         phase: GitChangesPhase,
@@ -80,7 +85,8 @@ struct GitChangesSnapshot: Equatable, Sendable {
         branch: String? = nil,
         baseRef: String? = nil,
         mergeBase: String? = nil,
-        files: [GitChangedFile] = []
+        files: [GitChangedFile] = [],
+        hasGitHubRemote: Bool = false
     ) {
         self.phase = phase
         self.repoRootPath = repoRootPath
@@ -90,6 +96,7 @@ struct GitChangesSnapshot: Equatable, Sendable {
         self.files = files
         self.totalAddedLines = files.compactMap(\.addedLines).reduce(0, +)
         self.totalDeletedLines = files.compactMap(\.deletedLines).reduce(0, +)
+        self.hasGitHubRemote = hasGitHubRemote
     }
 
     static let initial = GitChangesSnapshot(phase: .loading)
@@ -139,6 +146,9 @@ struct GitChangesResolvedBase: Equatable, Sendable {
     let mergeBase: String?
     /// Current branch short name.
     let branch: String?
+    /// Whether the repository has a GitHub remote slug (see
+    /// ``GitChangesSnapshot/hasGitHubRemote``).
+    let hasGitHubRemote: Bool
 }
 
 // MARK: - Untracked line counter
@@ -458,8 +468,12 @@ private final class GitProcessExecution: @unchecked Sendable {
 final class GitChangesStore: ObservableObject {
     @Published private(set) var snapshot: GitChangesSnapshot = .initial
 
-    /// Placeholder for U5: "Create PR prompt sent" pending state, scoped to
-    /// the workspace store so two windows cannot double-send.
+    /// "Create PR prompt sent" pending state (R17), scoped to the workspace
+    /// store so two windows showing the same workspace cannot double-send.
+    /// Set by ``sendCreatePRPrompt(workspaceId:agentSurfaceId:timeout:dispatch:)``;
+    /// cleared when polling reports a PR for the current branch
+    /// (``reconcileCreatePRPending(pullRequestExistsForCurrentBranch:)``) or
+    /// after ``createPRPendingTimeout``.
     @Published private(set) var createPRPending = false
 
     static let gitExecutablePath = "/usr/bin/git"
@@ -468,6 +482,9 @@ final class GitChangesStore: ObservableObject {
     static let minimumRefreshInterval: TimeInterval = 0.3
     static let refreshPacingFactor: Double = 3
     static let refreshQuietResetInterval: TimeInterval = 2
+    /// How long the Create PR button stays in "Prompt sent…" before
+    /// re-enabling when no PR appears for the branch (R17).
+    static let createPRPendingTimeout: TimeInterval = 300
 
     private enum RefreshTrigger {
         /// Workspace-tree FSEvent: numstat + status only.
@@ -500,6 +517,7 @@ final class GitChangesStore: ObservableObject {
     private var gitWatcher: RecursivePathWatcher?
     private var gitWatcherTask: Task<Void, Never>?
     private var gitWatcherSetupTask: Task<Void, Never>?
+    private var createPRPendingTimeoutTask: Task<Void, Never>?
 
     init(gitMetadataService: GitMetadataService = GitMetadataService()) {
         self.gitMetadataService = gitMetadataService
@@ -511,6 +529,7 @@ final class GitChangesStore: ObservableObject {
         gitWatcherSetupTask?.cancel()
         treeWatcherTask?.cancel()
         gitWatcherTask?.cancel()
+        createPRPendingTimeoutTask?.cancel()
         // Dropping the watcher references runs their deinits, which tear down
         // the FSEventStreams and finish the consumer tasks' streams.
     }
@@ -572,14 +591,83 @@ final class GitChangesStore: ObservableObject {
         teardownWatchers()
     }
 
-    /// U5 placeholder: marks the "Create PR prompt sent" pending state.
-    func markCreatePRPending() {
-        createPRPending = true
+    // MARK: Create PR (single shared mutation path)
+
+    /// Sends the fixed Create PR prompt to the chosen agent terminal and
+    /// enters the pending state. This is the ONE mutation path for every
+    /// Create PR entrypoint (sidebar Changes tab and pop-out pane, any
+    /// window): the workspace-scoped pending flag makes double-clicks and
+    /// two-window clicks no-ops (R17). A queued send (busy terminal) still
+    /// counts as sent — the socket layer reports `queued` but delivers.
+    ///
+    /// - Parameters:
+    ///   - dispatch: Test seam; production uses the Feed `surface.send_text`
+    ///     path, which is a non-focus socket command (socket policy: no
+    ///     first-responder change, no window raise).
+    /// - Returns: `false` when a send was already pending (nothing sent).
+    @discardableResult
+    func sendCreatePRPrompt(
+        workspaceId: UUID,
+        agentSurfaceId: UUID,
+        timeout: TimeInterval = GitChangesStore.createPRPendingTimeout,
+        dispatch: (@MainActor (_ workspaceId: UUID, _ surfaceId: UUID, _ text: String) -> Void)? = nil
+    ) -> Bool {
+        guard !createPRPending else { return false }
+        markCreatePRPending()
+        let send = dispatch ?? Self.dispatchCreatePRPromptViaFeedPath
+        send(workspaceId, agentSurfaceId, GitChangesCreatePRLogic.promptText)
+        createPRPendingTimeoutTask?.cancel()
+        // Bounded, cancellable timeout (Clock.sleep carve-out): re-enables the
+        // button when no PR appears for the branch within the window (R17).
+        createPRPendingTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(timeout))
+            guard let self, !Task.isCancelled else { return }
+            self.clearCreatePRPending()
+        }
+        return true
     }
 
-    /// U5 placeholder: clears the "Create PR prompt sent" pending state.
+    /// Clears the pending state once polling reports a PR for the workspace's
+    /// CURRENT branch. Called from the header observation on every
+    /// `panelPullRequests` change — a PR detected on a *different* branch
+    /// (the agent may have switched branches) keeps the pending state.
+    func reconcileCreatePRPending(pullRequestExistsForCurrentBranch: Bool) {
+        guard createPRPending, pullRequestExistsForCurrentBranch else { return }
+        clearCreatePRPending()
+    }
+
+    /// Marks the "Create PR prompt sent" pending state.
+    func markCreatePRPending() {
+        if !createPRPending {
+            createPRPending = true
+        }
+    }
+
+    /// Clears the "Create PR prompt sent" pending state.
     func clearCreatePRPending() {
-        createPRPending = false
+        createPRPendingTimeoutTask?.cancel()
+        createPRPendingTimeoutTask = nil
+        if createPRPending {
+            createPRPending = false
+        }
+    }
+
+    /// Production dispatch: the Feed's prompt-injection path
+    /// (`FeedJumpResolver.sendText` → `.feedRequestSendText` →
+    /// `AppDelegate.handleFeedRequestSendText` → `surface.send_text` socket
+    /// line). The AppDelegate handler appends the trailing CR so the prompt
+    /// plus Return is one atomic send; `surface.send_text` never changes
+    /// focus or raises a window.
+    private static func dispatchCreatePRPromptViaFeedPath(
+        workspaceId: UUID,
+        surfaceId: UUID,
+        text: String
+    ) {
+        FeedJumpResolver.sendText(
+            workspaceId: workspaceId.uuidString,
+            surfaceId: surfaceId.uuidString,
+            text: text
+        )
     }
 
     /// Runs one refresh to completion, bypassing pacing and suspension.
@@ -699,7 +787,8 @@ final class GitChangesStore: ObservableObject {
                         branch: snapshot.branch,
                         baseRef: snapshot.baseRef,
                         mergeBase: snapshot.mergeBase,
-                        files: snapshot.files
+                        files: snapshot.files,
+                        hasGitHubRemote: snapshot.hasGitHubRemote
                     )
                 )
             }
@@ -913,7 +1002,16 @@ extension GitChangesStore {
                 mergeBase = firstLine(result.stdout)
             }
         }
-        return GitChangesResolvedBase(baseRef: baseRef, mergeBase: mergeBase, branch: branch)
+        // GitHub slug detection for the PR header (R18). Reads remote URLs
+        // straight from `config` (no git subprocess), so it is cheap enough
+        // to ride the base-resolution cadence (`.git` events only).
+        let hasGitHubRemote = !(await GitMetadataService().repositorySlugs(forDirectory: repoRoot).isEmpty)
+        return GitChangesResolvedBase(
+            baseRef: baseRef,
+            mergeBase: mergeBase,
+            branch: branch,
+            hasGitHubRemote: hasGitHubRemote
+        )
     }
 
     /// One full refresh cycle. Runs entirely off-main; the caller applies the
@@ -1028,7 +1126,8 @@ extension GitChangesStore {
             branch: base?.branch,
             baseRef: degraded ? nil : base?.baseRef,
             mergeBase: base?.mergeBase,
-            files: files
+            files: files,
+            hasGitHubRemote: base?.hasGitHubRemote ?? false
         )
         return .success(
             snapshot: newSnapshot,
@@ -1273,5 +1372,62 @@ extension GitChangesStore {
                 guard !chunk.isEmpty else { return nil }
                 return String(data: Data(chunk), encoding: .utf8)
             }
+    }
+}
+
+// MARK: - Create PR logic (pure)
+
+/// Pure target-selection and prompt policy for the Changes header's Create PR
+/// button, kept off the store and views so it is unit-testable.
+nonisolated enum GitChangesCreatePRLogic {
+    /// One agent-terminal panel eligible to receive the Create PR prompt.
+    /// Candidates are built from `Workspace.agentPIDKeysByPanelId`, which only
+    /// agent hook registration populates — a plain shell never appears here
+    /// (R16: the prompt must never land where it would execute as commands).
+    struct AgentPanelCandidate: Equatable, Sendable {
+        let panelId: UUID
+        /// Latest agent status-entry timestamp attributable to the panel;
+        /// `nil` when the agent has not reported status yet.
+        let lastActivityAt: Date?
+
+        init(panelId: UUID, lastActivityAt: Date? = nil) {
+            self.panelId = panelId
+            self.lastActivityAt = lastActivityAt
+        }
+    }
+
+    /// The fixed prompt typed into the agent terminal.
+    ///
+    /// Deliberately a constant with NO interpolation: branch names and other
+    /// repo-derived strings are attacker-influencable (a crafted branch name
+    /// would be typed into the agent terminal verbatim), so the agent is told
+    /// to use "the current branch" instead. Fixed English by convention for
+    /// agent-directed prompts (the Feed path sends raw user text; agent CLIs
+    /// are English-first) — this string is consumed by the agent, not shown
+    /// in cmux UI, so it is intentionally not localized.
+    static let promptText = "Please push the current branch under its existing name and "
+        + "create a pull request for it: write a descriptive title and body "
+        + "summarizing the changes, then report the PR URL."
+
+    /// Targeting rule (R10/R16): the workspace's focused panel when it is an
+    /// agent terminal, otherwise the agent panel with the most recent status
+    /// activity ("most-recently-active agent"); panels that never reported
+    /// status rank last; ties break on panel id for determinism. Returns
+    /// `nil` when the workspace has no agent terminal (button disabled).
+    static func targetPanelId(
+        candidates: [AgentPanelCandidate],
+        focusedPanelId: UUID?
+    ) -> UUID? {
+        if let focusedPanelId, candidates.contains(where: { $0.panelId == focusedPanelId }) {
+            return focusedPanelId
+        }
+        return candidates.min { lhs, rhs in
+            let lhsActivity = lhs.lastActivityAt ?? .distantPast
+            let rhsActivity = rhs.lastActivityAt ?? .distantPast
+            if lhsActivity != rhsActivity {
+                return lhsActivity > rhsActivity // most recent first
+            }
+            return lhs.panelId.uuidString < rhs.panelId.uuidString
+        }?.panelId
     }
 }
