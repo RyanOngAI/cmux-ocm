@@ -9932,6 +9932,19 @@ enum SidebarPullRequestStatus: String {
     case open
     case merged
     case closed
+
+    /// Canonical localized status word, shared by the sidebar PR row and the
+    /// Changes panel PR pill (single source for these keys).
+    var localizedLabel: String {
+        switch self {
+        case .open:
+            return String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
+        case .merged:
+            return String(localized: "sidebar.pullRequest.statusMerged", defaultValue: "merged")
+        case .closed:
+            return String(localized: "sidebar.pullRequest.statusClosed", defaultValue: "closed")
+        }
+    }
 }
 
 private func normalizedSidebarBranchName(_ branch: String?) -> String? {

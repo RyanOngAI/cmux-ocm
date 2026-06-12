@@ -300,12 +300,21 @@ struct GitChangesStoreTests {
             now: base, lastRefreshEndedAt: nil, lastRefreshDuration: 5
         ) == 0)
 
-        // Quiet window (≥2s since last end) resets pacing → immediate.
+        // Quiet window (≥2s since last end, required gap already smaller)
+        // resets pacing → immediate.
         #expect(GitChangesStore.refreshDelay(
             now: base.addingTimeInterval(2.0),
             lastRefreshEndedAt: base,
-            lastRefreshDuration: 1.0
+            lastRefreshDuration: 0.5
         ) == 0)
+
+        // A 1s refresh enforces a 3s gap even past the 2s quiet window: the
+        // required gap wins when it is the larger of the two.
+        #expect(abs(GitChangesStore.refreshDelay(
+            now: base.addingTimeInterval(2.0),
+            lastRefreshEndedAt: base,
+            lastRefreshDuration: 1.0
+        ) - 1.0) < 0.0001)
 
         // Fast refresh → 300ms floor applies: 0.1s elapsed of a 0.3s gap.
         let floored = GitChangesStore.refreshDelay(
@@ -329,6 +338,82 @@ struct GitChangesStoreTests {
             lastRefreshEndedAt: base,
             lastRefreshDuration: 0.05
         ) == 0)
+
+        // Slow refresh (10s) → the 3× gap (30s) outlives the quiet window:
+        // an event at +3s still waits ~27s (the quiet reset must not
+        // short-circuit a larger required gap).
+        let slow = GitChangesStore.refreshDelay(
+            now: base.addingTimeInterval(3.0),
+            lastRefreshEndedAt: base,
+            lastRefreshDuration: 10.0
+        )
+        #expect(abs(slow - 27.0) < 0.0001)
+
+        // Once the full 30s gap has elapsed, the next event is immediate.
+        #expect(GitChangesStore.refreshDelay(
+            now: base.addingTimeInterval(31.0),
+            lastRefreshEndedAt: base,
+            lastRefreshDuration: 10.0
+        ) == 0)
+    }
+
+    // MARK: - Path containment (same-repo root changes)
+
+    @Test func pathContainmentMatchesEqualAndDescendantPathsOnly() {
+        #expect(GitChangesStore.isPath("/repo", containedIn: "/repo"))
+        #expect(GitChangesStore.isPath("/repo/sub", containedIn: "/repo"))
+        #expect(GitChangesStore.isPath("/repo/sub/deep", containedIn: "/repo"))
+        #expect(GitChangesStore.isPath("/repo/sub/", containedIn: "/repo"))
+        // Sibling with a shared prefix is NOT contained.
+        #expect(!GitChangesStore.isPath("/repository", containedIn: "/repo"))
+        // The ancestor itself is not contained in its child.
+        #expect(!GitChangesStore.isPath("/repo", containedIn: "/repo/sub"))
+        #expect(!GitChangesStore.isPath("/other", containedIn: "/repo"))
+    }
+
+    @Test @MainActor func sameRepoSubdirectoryRootChangeKeepsSnapshot() async throws {
+        let directory = try makeTempDirectory()
+        try git(["init", "-q", "-b", "main"], in: directory)
+        try write("one\n", to: "base.txt", in: directory)
+        try git(["add", "."], in: directory)
+        try git(["commit", "-q", "-m", "init"], in: directory)
+        try FileManager.default.createDirectory(
+            atPath: directory + "/sub",
+            withIntermediateDirectories: true
+        )
+        try write("hello\n", to: "sub/untracked.txt", in: directory)
+
+        let store = GitChangesStore()
+        store.setWorkspaceRoot(.local(path: directory))
+        await store.refreshNow()
+        let before = store.snapshot
+        #expect(before.phase != .loading)
+        #expect(before.repoRootPath != nil)
+
+        // cwd moves to a subdirectory of the resolved repo root: the snapshot
+        // survives (no `.loading` flash / cache drop), only a refresh is
+        // scheduled.
+        store.setWorkspaceRoot(.local(path: directory + "/sub"))
+        #expect(store.snapshot == before)
+
+        // A refresh from the subdirectory resolves the same repo root.
+        await store.refreshNow()
+        #expect(normalizedPath(store.snapshot.repoRootPath ?? "") == directory)
+    }
+
+    @Test func untrackedCounterPrunesEntriesOutsideKeepSet() throws {
+        let directory = try makeTempDirectory()
+        try write("a\n", to: "keep.txt", in: directory)
+        try write("b\n", to: "drop.txt", in: directory)
+        var counter = GitUntrackedLineCounter()
+        _ = counter.count(atPath: directory + "/keep.txt")
+        _ = counter.count(atPath: directory + "/drop.txt")
+        #expect(counter.cache.count == 2)
+
+        counter.pruneCache(keepingPaths: [directory + "/keep.txt"])
+        #expect(counter.cache.count == 1)
+        #expect(counter.cache[directory + "/keep.txt"] != nil)
+        #expect(counter.cache[directory + "/drop.txt"] == nil)
     }
 
     // MARK: - Publish discipline

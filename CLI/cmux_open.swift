@@ -911,12 +911,12 @@ extension CMUXCLI {
             // Stale/unknown handles still flow through as-is: the app treats an
             // unresolvable reuse surface as "open a fresh split" rather than
             // failing the whole diff command.
-            let normalizedReuseSurface = (try? normalizeSurfaceHandle(
+            let normalizedReuseSurface = try? normalizeSurfaceHandle(
                 reuseSurface,
                 client: activeClient,
                 workspaceHandle: workspaceHandle,
                 windowHandle: windowHandle
-            )) ?? nil
+            )
             params["reuse_surface_id"] = normalizedReuseSurface ?? reuseSurface
         }
 

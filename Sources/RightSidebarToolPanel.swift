@@ -22,6 +22,11 @@ final class RightSidebarToolPanel: Panel, ObservableObject {
     /// Published so the hosted view re-resolves after cross-window reattach.
     @Published private(set) var gitChangesStoreStorage: GitChangesStore?
     private var gitChangesAttachedWorkspaceId: UUID?
+    /// The exact TabManager the current registration was made against; detach
+    /// must decrement THIS manager's registry — after a cross-window workspace
+    /// move, resolving by workspace id would target the destination manager
+    /// and corrupt a registration it never made.
+    private weak var gitChangesAttachedTabManager: TabManager?
     private var workspaceObservationCancellable: AnyCancellable?
 
     init(workspace: Workspace, mode: RightSidebarMode) {
@@ -100,9 +105,10 @@ final class RightSidebarToolPanel: Panel, ObservableObject {
             guard let store = fileExplorerStoreStorage else { return }
             syncFileExplorerRoot(from: workspace, store: store)
         case .changes:
-            // Root updates flow into the registry-owned store directly; the
-            // observer registration itself only changes in reattach/close.
-            gitChangesStoreStorage?.setWorkspaceRoot(.forWorkspace(workspace))
+            // Re-runs the attach so manager drift (workspace moved windows
+            // without a reattach) re-homes the registration; the same-manager
+            // case reduces to a root update on the registry-owned store.
+            attachGitChangesObserver(to: workspace)
         case .sessions:
             guard let store = sessionIndexStoreStorage else { return }
             syncSessionIndexRoot(from: workspace, store: store)
@@ -112,32 +118,41 @@ final class RightSidebarToolPanel: Panel, ObservableObject {
     }
 
     /// Attaches this pane as one visible observer of the workspace's Changes
-    /// store, releasing any registration held against a previous workspace
-    /// (cross-window surface transfer re-runs `reattach(to:)`).
+    /// store, releasing any registration held against a previous workspace or
+    /// a previous TabManager (cross-window surface transfer re-runs
+    /// `reattach(to:)`; a workspace moved between windows resolves to a new
+    /// manager even with the same workspace id).
     private func attachGitChangesObserver(to workspace: Workspace) {
-        guard gitChangesAttachedWorkspaceId != workspace.id else {
+        let manager = resolvedTabManager(for: workspace)
+        if gitChangesAttachedWorkspaceId == workspace.id,
+           let manager, manager === gitChangesAttachedTabManager {
             gitChangesStoreStorage?.setWorkspaceRoot(.forWorkspace(workspace))
             return
         }
         detachGitChangesObserverIfNeeded()
-        guard let tabManager = resolvedTabManager(for: workspace) else { return }
-        gitChangesStoreStorage = tabManager.attachGitChangesObserver(
+        guard let manager else { return }
+        gitChangesStoreStorage = manager.attachGitChangesObserver(
             workspaceId: workspace.id,
             root: .forWorkspace(workspace)
         )
         gitChangesAttachedWorkspaceId = workspace.id
+        gitChangesAttachedTabManager = manager
     }
 
     private func detachGitChangesObserverIfNeeded() {
         guard let workspaceId = gitChangesAttachedWorkspaceId else { return }
-        gitChangesAttachedWorkspaceId = nil
-        gitChangesStoreStorage = nil
-        // Resolve by the *attached* workspace id first: during a cross-window
-        // reattach `workspace` already points at the destination, whose
-        // TabManager may differ from the one holding this registration.
-        let manager = AppDelegate.shared?.tabManagerFor(tabId: workspaceId)
+        // Detach ALWAYS goes through the manager the attach was made against;
+        // resolving by workspace id would target the destination manager
+        // after a cross-window move (decrementing a registration it never
+        // made and leaking the source's). Fallback chain only when the
+        // recorded manager is gone.
+        let manager = gitChangesAttachedTabManager
+            ?? AppDelegate.shared?.tabManagerFor(tabId: workspaceId)
             ?? workspace.flatMap { resolvedTabManager(for: $0) }
             ?? AppDelegate.shared?.tabManager
+        gitChangesAttachedWorkspaceId = nil
+        gitChangesAttachedTabManager = nil
+        gitChangesStoreStorage = nil
         manager?.detachGitChangesObserver(workspaceId: workspaceId)
     }
 

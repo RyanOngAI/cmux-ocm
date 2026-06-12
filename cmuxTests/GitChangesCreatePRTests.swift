@@ -379,7 +379,9 @@ struct GitChangesCreatePRTests {
         }
         #expect(!second)
         #expect(sent.count == 1)
-        store.clearCreatePRPending()
+        // Clear through the public reconcile path (the mutators are private;
+        // sendCreatePRPrompt/reconcile/timeout are the only mutation paths).
+        store.reconcileCreatePRPending(pullRequestExistsForCurrentBranch: true)
     }
 
     @MainActor
@@ -442,6 +444,6 @@ struct GitChangesCreatePRTests {
             dispatchedText = text
         }
         #expect(dispatchedText == GitChangesCreatePRLogic.promptText)
-        store.clearCreatePRPending()
+        store.reconcileCreatePRPending(pullRequestExistsForCurrentBranch: true)
     }
 }

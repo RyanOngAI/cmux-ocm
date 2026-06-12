@@ -1057,6 +1057,16 @@ func titlebarShortcutHintShouldShow(
     !shortcut.isUnbound && (alwaysShowShortcutHints || (shortcut.command && modifierPressed))
 }
 
+/// Weak holder so `@State` can record which TabManager a Changes-store attach
+/// was made against without retaining it past window teardown.
+private struct GitChangesAttachedManagerRef {
+    weak var manager: TabManager?
+
+    init(manager: TabManager? = nil) {
+        self.manager = manager
+    }
+}
+
 struct ContentView: View {
     var updateViewModel: UpdateStateModel
     let windowId: UUID
@@ -1100,6 +1110,11 @@ struct ContentView: View {
     /// strictly paired through `syncGitChangesObserver()`.
     @State private var gitChangesStore: GitChangesStore?
     @State private var gitChangesAttachedWorkspaceId: UUID?
+    /// Weak record of the exact TabManager the attach was made against;
+    /// detach must decrement THIS manager's registry, never one resolved by
+    /// workspace id after a cross-window move (`@State` cannot be `weak`, so
+    /// the reference lives in a tiny holder).
+    @State private var gitChangesAttachedTabManager = GitChangesAttachedManagerRef()
     @State private var commandPaletteOverlayRenderModel = CommandPaletteOverlayRenderModel()
     @State private var backgroundWorkspacePrimeCoordinator = BackgroundWorkspacePrimeCoordinator()
     @State private var fileExplorerWidth: CGFloat = 220
@@ -2695,20 +2710,27 @@ struct ContentView: View {
             return
         }
         let root = GitChangesWorkspaceRoot.forWorkspace(tab)
-        if gitChangesAttachedWorkspaceId == tab.id, let store = gitChangesStore {
+        if gitChangesAttachedWorkspaceId == tab.id,
+           gitChangesAttachedTabManager.manager === tabManager,
+           let store = gitChangesStore {
             store.setWorkspaceRoot(root)
             return
         }
         detachGitChangesObserverIfNeeded()
         gitChangesStore = tabManager.attachGitChangesObserver(workspaceId: tab.id, root: root)
         gitChangesAttachedWorkspaceId = tab.id
+        gitChangesAttachedTabManager = GitChangesAttachedManagerRef(manager: tabManager)
     }
 
     private func detachGitChangesObserverIfNeeded() {
         guard let workspaceId = gitChangesAttachedWorkspaceId else { return }
-        tabManager.detachGitChangesObserver(workspaceId: workspaceId)
+        // Detach through the manager the attach was made against; this
+        // window's `tabManager` is only the fallback when it is gone.
+        let manager = gitChangesAttachedTabManager.manager ?? tabManager
         gitChangesAttachedWorkspaceId = nil
+        gitChangesAttachedTabManager = GitChangesAttachedManagerRef()
         gitChangesStore = nil
+        manager.detachGitChangesObserver(workspaceId: workspaceId)
     }
 
     private func syncFileExplorerDirectory() {
@@ -15962,7 +15984,7 @@ struct TabItemView: View, Equatable {
                                 fontScale: fontScale
                             )
                             Text(pullRequestTitle).underline(settings.makesPullRequestsClickable).lineLimit(1).truncationMode(.tail)
-                            Text(pullRequestStatusLabel(pullRequest.status)).lineLimit(1)
+                            Text(pullRequest.status.localizedLabel).lineLimit(1)
                             Spacer(minLength: 0)
                         }
                         .font(.system(size: scaledFontSize(10), weight: .semibold))
@@ -16981,14 +17003,6 @@ struct TabItemView: View, Equatable {
             return
         }
         NSWorkspace.shared.open(url)
-    }
-
-    private func pullRequestStatusLabel(_ status: SidebarPullRequestStatus) -> String {
-        switch status {
-        case .open: return String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
-        case .merged: return String(localized: "sidebar.pullRequest.statusMerged", defaultValue: "merged")
-        case .closed: return String(localized: "sidebar.pullRequest.statusClosed", defaultValue: "closed")
-        }
     }
 
     private func logLevelIcon(_ level: SidebarLogLevel) -> String {

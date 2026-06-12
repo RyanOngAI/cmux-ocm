@@ -223,6 +223,13 @@ struct GitUntrackedLineCounter: Sendable {
         return (entry.addedLines, entry.isBinary, true)
     }
 
+    /// Drops cache entries whose path is not in this refresh's untracked set
+    /// (absolute paths), so tracked-or-deleted files cannot grow the cache
+    /// without bound. O(cache size).
+    mutating func pruneCache(keepingPaths keep: Set<String>) {
+        cache = cache.filter { keep.contains($0.key) }
+    }
+
     /// Pure measurement: newline count, +1 when non-empty without a trailing
     /// newline (git numstat semantics); NUL in the first 8000 bytes → binary.
     static func measure(_ data: Data) -> (lineCount: Int, isBinary: Bool) {
@@ -537,9 +544,27 @@ final class GitChangesStore: ObservableObject {
     // MARK: Public lifecycle (driven by TabManager's registry)
 
     /// Updates the workspace root. A change resets all caches and, when the
-    /// store is active, restarts watchers and refreshes immediately.
+    /// store is active, restarts watchers and refreshes immediately — except
+    /// when both roots are local and the new path is still inside the already
+    /// resolved repo root, where the snapshot, caches, and watchers survive
+    /// (terminal focus moves between subdirectories must not flash the UI).
     func setWorkspaceRoot(_ newRoot: GitChangesWorkspaceRoot) {
         guard newRoot != workspaceRoot else { return }
+        if case .local(let newPath) = newRoot,
+           case .local = workspaceRoot,
+           let repoRoot = snapshot.repoRootPath,
+           Self.isPath(newPath, containedIn: repoRoot) {
+            workspaceRoot = newRoot
+            if !isSuspended {
+                // The tree watcher can still be rooted at the pre-refresh
+                // workspace path; re-root it to the repo root so events from
+                // the whole repo keep flowing (no-op when already there).
+                updateTreeWatcher(path: repoRoot)
+                refreshGitWatcherPaths(for: repoRoot)
+                scheduleRefresh(trigger: .attach)
+            }
+            return
+        }
         workspaceRoot = newRoot
         generation &+= 1
         cancelRefreshWork()
@@ -636,15 +661,19 @@ final class GitChangesStore: ObservableObject {
         clearCreatePRPending()
     }
 
-    /// Marks the "Create PR prompt sent" pending state.
-    func markCreatePRPending() {
+    /// Marks the "Create PR prompt sent" pending state. Private so
+    /// ``sendCreatePRPrompt(workspaceId:agentSurfaceId:timeout:dispatch:)``,
+    /// ``reconcileCreatePRPending(pullRequestExistsForCurrentBranch:)``, and
+    /// the timeout stay the only mutation paths.
+    private func markCreatePRPending() {
         if !createPRPending {
             createPRPending = true
         }
     }
 
-    /// Clears the "Create PR prompt sent" pending state.
-    func clearCreatePRPending() {
+    /// Clears the "Create PR prompt sent" pending state (see
+    /// ``markCreatePRPending()`` for the single-mutation-path rationale).
+    private func clearCreatePRPending() {
         createPRPendingTimeoutTask?.cancel()
         createPRPendingTimeoutTask = nil
         if createPRPending {
@@ -812,7 +841,10 @@ final class GitChangesStore: ObservableObject {
 
     /// Pure pacing math: seconds to wait before the next refresh may start.
     /// Next refresh ≥ `max(minimumInterval, pacingFactor × last duration)`
-    /// after the last one ended; resets to immediate after a quiet window.
+    /// after the last one ended. The quiet-window reset only short-circuits
+    /// once `max(quietResetInterval, requiredGap)` has elapsed — the required
+    /// gap always wins when larger, so a slow refresh (e.g. 10s → 30s gap)
+    /// stays paced well past the quiet window.
     nonisolated static func refreshDelay(
         now: Date,
         lastRefreshEndedAt: Date?,
@@ -823,9 +855,22 @@ final class GitChangesStore: ObservableObject {
     ) -> TimeInterval {
         guard let lastRefreshEndedAt else { return 0 }
         let sinceLast = now.timeIntervalSince(lastRefreshEndedAt)
-        guard sinceLast < quietResetInterval else { return 0 }
         let requiredGap = max(minimumInterval, pacingFactor * lastRefreshDuration)
+        guard sinceLast < max(quietResetInterval, requiredGap) else { return 0 }
         return max(0, requiredGap - sinceLast)
+    }
+
+    /// Pure containment check: true when `path` equals `ancestor` or lives
+    /// beneath it (component-wise after `standardizingPath`; symlinks are not
+    /// resolved — a mismatch just falls back to the full root reset).
+    nonisolated static func isPath(_ path: String, containedIn ancestor: String) -> Bool {
+        let normalizedPath = (path as NSString).standardizingPath
+        let normalizedAncestor = (ancestor as NSString).standardizingPath
+        if normalizedPath == normalizedAncestor { return true }
+        let prefix = normalizedAncestor.hasSuffix("/")
+            ? normalizedAncestor
+            : normalizedAncestor + "/"
+        return normalizedPath.hasPrefix(prefix)
     }
 
     // MARK: Watchers
@@ -1097,14 +1142,19 @@ extension GitChangesStore {
             .filter { $0.indexStatus == "?" }
             .map(\.path)
             .sorted()
+        var untrackedAbsolutePaths: Set<String> = []
         for relativePath in untrackedPaths {
             let absolutePath = (repoRoot as NSString).appendingPathComponent(relativePath)
+            untrackedAbsolutePaths.insert(absolutePath)
             let allowRead = readsThisRefresh < GitUntrackedLineCounter.maxCountedFilesPerRefresh
             let result = counter.count(atPath: absolutePath, allowRead: allowRead)
             if result.didRead { readsThisRefresh += 1 }
             if result.isBinary { untrackedBinaryPaths.insert(relativePath) }
             if let lines = result.addedLines { untrackedAddedLines[relativePath] = lines }
         }
+        // Entries for files no longer untracked (committed, deleted, ignored)
+        // would otherwise accumulate forever.
+        counter.pruneCache(keepingPaths: untrackedAbsolutePaths)
 
         let files = mergeChangedFiles(
             numstat: numstat,

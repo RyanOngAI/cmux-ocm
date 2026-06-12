@@ -1750,6 +1750,10 @@ class TabManager: ObservableObject {
     /// Tears down the workspace's changes store entirely (workspace close or
     /// detach from this window). Suspends first so watchers and in-flight git
     /// work stop deterministically before the reference drops.
+    ///
+    /// Removing the counts entry resets the observer count: a late
+    /// `detachGitChangesObserver` from a stale manager (e.g. after a
+    /// cross-window workspace move) finds no entry and is a harmless no-op.
     private func teardownGitChangesStore(workspaceId: UUID) {
         gitChangesObserverCountsByWorkspaceId.removeValue(forKey: workspaceId)
         if let store = gitChangesStoresByWorkspaceId.removeValue(forKey: workspaceId) {

@@ -972,8 +972,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// path. Stale entries are validated against the live workspace on use.
     private var changesDiffViewerSessions: [UUID: ChangesDiffViewerSession] = [:]
     /// Workspaces with a Changes-panel diff CLI launch currently in flight;
-    /// duplicate clicks are dropped instead of stacking splits.
+    /// duplicate clicks are coalesced instead of stacking splits.
     private var changesDiffViewerLaunchesInFlight: Set<UUID> = []
+    /// Latest row click that arrived while a launch was in flight, per
+    /// workspace; served (jump or relaunch) when the launch completes so
+    /// clicks on a different file are never dropped.
+    private var changesDiffViewerPendingRequests: [UUID: ChangesDiffViewerPendingRequest] = [:]
 
 #if DEBUG
     private var didSetupJumpUnreadUITest = false
@@ -6171,6 +6175,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         var identity: ChangesDiffViewerContentIdentity?
     }
 
+    /// A Changes-panel row click that arrived while a viewer launch for the
+    /// same workspace was in flight; replayed once that launch completes.
+    private struct ChangesDiffViewerPendingRequest {
+        var filePath: String
+        var snapshot: GitChangesSnapshot?
+    }
+
     /// Opens the branch diff viewer for a Changes-panel row click, scrolled to
     /// `filePath` (repo-root-relative). Reuse rules, in order:
     /// 1. A previously launched viewer is alive, still shows a diff-viewer URL,
@@ -6198,7 +6209,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             if let panel = workspace.browserPanel(for: session.surfaceId),
                panel.diffViewerSessionComponents() != nil {
                 if let identity, session.identity == identity {
-                    scrollChangesDiffViewer(panel: panel, in: workspace, toFile: filePath)
+                    // Fast path is asynchronous: when the bridge is missing,
+                    // the page shows a different diff, or the file is not in
+                    // the rendered tree, drop the identity and re-enter so
+                    // the click relaunches with --reuse-surface instead of
+                    // silently no-opping.
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        let jumped = await self.scrollChangesDiffViewer(
+                            panel: panel, in: workspace, toFile: filePath
+                        )
+                        guard !jumped else { return }
+                        self.changesDiffViewerSessions[workspaceId]?.identity = nil
+                        _ = self.openBranchDiffViewer(
+                            workspaceId: workspaceId,
+                            filePath: filePath,
+                            snapshot: snapshot
+                        )
+                    }
                     return true
                 }
                 reuseSurfaceId = session.surfaceId
@@ -6209,8 +6237,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         // One launch at a time per workspace; rapid re-clicks would otherwise
-        // race the surface-id capture and stack extra splits.
+        // race the surface-id capture and stack extra splits. Remember the
+        // newest request so the termination handler serves it instead of
+        // dropping the click.
         guard !changesDiffViewerLaunchesInFlight.contains(workspaceId) else {
+            changesDiffViewerPendingRequests[workspaceId] = ChangesDiffViewerPendingRequest(
+                filePath: filePath,
+                snapshot: snapshot
+            )
             return true
         }
 
@@ -6232,20 +6266,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         )
     }
 
-    /// Same-diff fast path: scroll the already-rendered viewer to the file via
-    /// the page's `window.cmuxDiffViewerScrollToFile` bridge and focus it.
+    /// Same-diff fast path: scrolls the already-rendered viewer to the file
+    /// via the page's `window.cmuxDiffViewerScrollToFile` bridge and focuses
+    /// it. Returns `false` (without focusing) when the script throws, the
+    /// bridge is not installed, or the file is not in the rendered tree —
+    /// callers fall back to the CLI relaunch path so the click never
+    /// silently no-ops.
     private func scrollChangesDiffViewer(
         panel: BrowserPanel,
         in workspace: Workspace,
         toFile filePath: String
-    ) {
-        if let pathLiteral = Self.changesDiffViewerJSONStringLiteral(filePath) {
-            let script = "(() => { const jump = window.cmuxDiffViewerScrollToFile; return typeof jump === \"function\" ? jump(\(pathLiteral)) === true : false; })()"
-            Task { @MainActor in
-                _ = try? await panel.evaluateJavaScript(script)
-            }
+    ) async -> Bool {
+        guard let pathLiteral = Self.changesDiffViewerJSONStringLiteral(filePath) else {
+            return false
         }
+        let script = "(() => { const jump = window.cmuxDiffViewerScrollToFile; return typeof jump === \"function\" ? jump(\(pathLiteral)) === true : false; })()"
+        let result = try? await panel.evaluateJavaScript(script)
+        guard (result as? Bool) == true else { return false }
         workspace.focusPanel(panel.id)
+        return true
     }
 
     private static func changesDiffViewerJSONStringLiteral(_ value: String) -> String? {
@@ -6318,6 +6357,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     delegate.changesDiffViewerSessions[workspaceId] = ChangesDiffViewerSession(
                         surfaceId: launchedSurfaceId,
                         identity: identity
+                    )
+                }
+                // A click on a different file arrived mid-launch: replay it
+                // now (in-page jump when the identity still matches, CLI
+                // relaunch otherwise) instead of dropping it.
+                if let pending = delegate.changesDiffViewerPendingRequests.removeValue(forKey: workspaceId),
+                   pending.filePath != filePath {
+                    _ = delegate.openBranchDiffViewer(
+                        workspaceId: workspaceId,
+                        filePath: pending.filePath,
+                        snapshot: pending.snapshot
                     )
                 }
                 guard terminationStatus != 0 else { return }

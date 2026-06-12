@@ -99,18 +99,6 @@ nonisolated enum GitChangesPanelFormatting {
         )
     }
 
-    /// Localized PR status word (reuses the sidebar's PR status keys).
-    static func prStatusLabel(_ status: SidebarPullRequestStatus) -> String {
-        switch status {
-        case .open:
-            return String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
-        case .merged:
-            return String(localized: "sidebar.pullRequest.statusMerged", defaultValue: "merged")
-        case .closed:
-            return String(localized: "sidebar.pullRequest.statusClosed", defaultValue: "closed")
-        }
-    }
-
     /// Localized aggregate check-state description for tooltips and
     /// accessibility. `nil`/unknown/noChecks render the neutral descriptions
     /// (R15: never claim passing or failing without a definitive rollup).
@@ -700,7 +688,7 @@ private struct GitChangesPRHeaderSectionView: View {
                 Text(GitChangesPanelFormatting.prPillTitle(number: pill.number))
                     .font(.system(size: 11, weight: .semibold).monospacedDigit())
                     .foregroundColor(.primary)
-                Text(GitChangesPanelFormatting.prStatusLabel(pill.status))
+                Text(pill.status.localizedLabel)
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
@@ -766,7 +754,7 @@ private struct GitChangesPRHeaderSectionView: View {
         String.localizedStringWithFormat(
             String(localized: "changes.pr.accessibility", defaultValue: "%1$@, %2$@, %3$@"),
             GitChangesPanelFormatting.prPillTitle(number: pill.number),
-            GitChangesPanelFormatting.prStatusLabel(pill.status),
+            pill.status.localizedLabel,
             GitChangesPanelFormatting.checkStateDescription(pill.rollupState)
         )
     }
