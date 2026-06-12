@@ -6325,6 +6325,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if let reuseSurfaceId {
             arguments.append(contentsOf: ["--reuse-surface", reuseSurfaceId.uuidString])
         }
+        // Diff against the same base the Changes panel resolved (which honors
+        // the per-repo `cmux.changes.base` override); without this the CLI
+        // re-resolves origin/HEAD and the viewer could disagree with the list.
+        if let baseRef = identity?.baseRef {
+            arguments.append(contentsOf: ["--base", baseRef])
+        }
         process.arguments = arguments
         process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
         var environment = ProcessInfo.processInfo.environment

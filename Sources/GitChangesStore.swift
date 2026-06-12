@@ -1011,7 +1011,8 @@ extension GitChangesStore {
 
     /// Default-branch resolution chain (ported from the CLI's
     /// `resolvedGitBranchDiffBaseRef`, narrowed per the plan):
-    /// `origin/HEAD` symref → local `main` → local `master` → none.
+    /// `cmux.changes.base` git config (per-repo override, must resolve to a
+    /// commit) → `origin/HEAD` symref → local `main` → local `master` → none.
     /// Returns `nil` on a process-level git failure.
     nonisolated static func resolveBase(repoRoot: String) async -> GitChangesResolvedBase? {
         guard let branchResult = await runGit(
@@ -1020,20 +1021,36 @@ extension GitChangesStore {
         let branch = branchResult.exitStatus == 0 ? firstLine(branchResult.stdout) : nil
 
         var baseRef: String?
-        guard let originHead = await runGit(
-            ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], in: repoRoot
+        guard let configuredBase = await runGit(
+            ["config", "--get", "cmux.changes.base"], in: repoRoot
         ) else { return nil }
-        if originHead.exitStatus == 0, let line = firstLine(originHead.stdout) {
-            baseRef = line
-        } else {
-            for candidate in ["main", "master"] {
-                guard let result = await runGit(
-                    ["rev-parse", "--verify", "--quiet", "refs/heads/\(candidate)^{commit}"],
-                    in: repoRoot
-                ) else { return nil }
-                if result.exitStatus == 0 {
-                    baseRef = candidate
-                    break
+        if configuredBase.exitStatus == 0, let configured = firstLine(configuredBase.stdout),
+           !configured.isEmpty {
+            guard let verified = await runGit(
+                ["rev-parse", "--verify", "--quiet", "\(configured)^{commit}"], in: repoRoot
+            ) else { return nil }
+            if verified.exitStatus == 0 {
+                baseRef = configured
+            }
+            // An unresolvable configured ref falls through to auto-detection
+            // rather than putting the panel in degraded mode.
+        }
+        if baseRef == nil {
+            guard let originHead = await runGit(
+                ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], in: repoRoot
+            ) else { return nil }
+            if originHead.exitStatus == 0, let line = firstLine(originHead.stdout) {
+                baseRef = line
+            } else {
+                for candidate in ["main", "master"] {
+                    guard let result = await runGit(
+                        ["rev-parse", "--verify", "--quiet", "refs/heads/\(candidate)^{commit}"],
+                        in: repoRoot
+                    ) else { return nil }
+                    if result.exitStatus == 0 {
+                        baseRef = candidate
+                        break
+                    }
                 }
             }
         }

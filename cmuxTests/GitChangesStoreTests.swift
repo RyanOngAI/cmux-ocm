@@ -470,6 +470,31 @@ struct GitChangesStoreTests {
         #expect(base.branch == "main")
     }
 
+    @Test func configuredBaseOverridesAutoDetection() async throws {
+        // cmux.changes.base wins over origin/HEAD when it resolves to a commit.
+        let directory = try makeTempDirectory()
+        try git(["init", "-q", "-b", "main"], in: directory)
+        try git(["commit", "-q", "--allow-empty", "-m", "init"], in: directory)
+        try git(["update-ref", "refs/remotes/origin/main", "HEAD"], in: directory)
+        try git(
+            ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"],
+            in: directory
+        )
+        try git(["update-ref", "refs/remotes/myfork/main", "HEAD"], in: directory)
+        try git(["config", "cmux.changes.base", "myfork/main"], in: directory)
+
+        let resolved = await GitChangesStore.resolveBase(repoRoot: directory)
+        let base = try #require(resolved)
+        #expect(base.baseRef == "myfork/main")
+        #expect(base.mergeBase != nil)
+
+        // An unresolvable configured ref falls through to auto-detection.
+        try git(["config", "cmux.changes.base", "nosuch/branch"], in: directory)
+        let fallback = await GitChangesStore.resolveBase(repoRoot: directory)
+        let fallbackBase = try #require(fallback)
+        #expect(fallbackBase.baseRef == "origin/main")
+    }
+
     @Test func defaultBranchChainFallsBackToLocalMainThenNone() async throws {
         // origin/HEAD unset, local main exists → "main".
         let withMain = try makeTempDirectory()

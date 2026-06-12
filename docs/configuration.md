@@ -62,6 +62,16 @@ Default: `unified`.
 
 The toolbar layout toggle persists the last user choice for future generated diff viewers. Passing `cmux diff --layout split` or `cmux diff --layout unified` overrides both the saved toolbar choice and this default for that invocation.
 
+## Changes panel base branch (per-repository git config)
+
+The Changes sidebar tab compares your branch against an auto-detected default branch (`origin/HEAD`, falling back to local `main`/`master`). To compare against a different ref — for example a fork remote's main — set the per-repository git config key:
+
+```bash
+git config cmux.changes.base myfork/main
+```
+
+The value must resolve to a commit (any ref works: `remote/branch`, a local branch, a tag). An unresolvable value is ignored and auto-detection applies. Clicking a file in the Changes panel opens the diff viewer against the same base. This is git config, not `cmux.json`, because the base branch is inherently per-repository.
+
 ## `shortcuts.bindings`
 
 Rebind cmux-owned keyboard shortcuts by action name. The full action list and syntax live in the [keyboard shortcuts docs](https://cmux.com/docs/keyboard-shortcuts) and the JSON schema (`web/data/cmux.schema.json`).
