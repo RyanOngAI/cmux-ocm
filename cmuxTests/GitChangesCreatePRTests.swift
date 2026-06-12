@@ -178,6 +178,38 @@ struct GitChangesCreatePRTests {
         #expect(other == nil)
     }
 
+    @Test func resolvedPullRequestIgnoresClosedAndStaleMergedPRs() {
+        let panelId = UUID()
+        let closed = GitChangesPRHeaderLogic.resolvedPullRequest(
+            panelPullRequests: [panelId: makePRState(status: .closed)],
+            branch: "feat/topic",
+            focusedPanelId: panelId
+        )
+        #expect(closed == nil)
+
+        let mergedFresh = GitChangesPRHeaderLogic.resolvedPullRequest(
+            panelPullRequests: [panelId: makePRState(status: .merged)],
+            branch: "feat/topic",
+            focusedPanelId: panelId
+        )
+        #expect(mergedFresh != nil)
+
+        let staleMergedState = SidebarPullRequestState(
+            number: 42,
+            label: "PR #42",
+            url: URL(string: "https://github.com/o/r/pull/42")!,
+            status: .merged,
+            branch: "feat/topic",
+            isStale: true
+        )
+        let mergedStale = GitChangesPRHeaderLogic.resolvedPullRequest(
+            panelPullRequests: [panelId: staleMergedState],
+            branch: "feat/topic",
+            focusedPanelId: panelId
+        )
+        #expect(mergedStale == nil)
+    }
+
     @Test func resolvedPullRequestPrefersFocusedPanel() {
         let focusedPanelId = UUID()
         let otherPanelId = UUID()

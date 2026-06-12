@@ -250,7 +250,15 @@ nonisolated enum GitChangesPRHeaderLogic {
         focusedPanelId: UUID?
     ) -> (panelId: UUID, state: SidebarPullRequestState)? {
         guard let branch else { return nil }
-        let matches = panelPullRequests.filter { $0.value.branch == branch }
+        // A closed PR is not a live PR for the branch — the header falls
+        // through to Create PR instead of pinning a dead pill (and a closed
+        // PR must not clear the Create PR pending state). Merged stays
+        // visible only until the existing staleness sweep marks it stale.
+        let matches = panelPullRequests.filter { entry in
+            entry.value.branch == branch
+                && entry.value.status != .closed
+                && !(entry.value.status == .merged && entry.value.isStale)
+        }
         guard !matches.isEmpty else { return nil }
         if let focusedPanelId, let state = matches[focusedPanelId] {
             return (focusedPanelId, state)
