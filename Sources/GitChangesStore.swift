@@ -684,9 +684,10 @@ final class GitChangesStore: ObservableObject {
     /// Production dispatch: the Feed's prompt-injection path
     /// (`FeedJumpResolver.sendText` → `.feedRequestSendText` →
     /// `AppDelegate.handleFeedRequestSendText` → `surface.send_text` socket
-    /// line). The AppDelegate handler appends the trailing CR so the prompt
-    /// plus Return is one atomic send; `surface.send_text` never changes
-    /// focus or raises a window.
+    /// line). `pressEnter: true` follows the pasted prompt with a real
+    /// Return keypress so agent composers submit it — a trailing CR inside
+    /// the bracketed paste would just sit in the input box. Neither send
+    /// changes focus or raises a window.
     private static func dispatchCreatePRPromptViaFeedPath(
         workspaceId: UUID,
         surfaceId: UUID,
@@ -695,7 +696,8 @@ final class GitChangesStore: ObservableObject {
         FeedJumpResolver.sendText(
             workspaceId: workspaceId.uuidString,
             surfaceId: surfaceId.uuidString,
-            text: text
+            text: text,
+            pressEnter: true
         )
     }
 

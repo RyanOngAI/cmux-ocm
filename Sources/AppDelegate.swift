@@ -9124,12 +9124,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             else { return }
             _ = controller.handleSocketLine(line)
         }
-        // Terminal-mode Return is CR. sendNamedKey "Return" also works
-        // but one send_text is atomic, so append CR directly.
-        invoke("surface.send_text", [
-            "surface_id": surfaceId,
-            "text": text + "\r",
-        ])
+        let pressEnter = notification.userInfo?["pressEnter"] as? Bool ?? false
+        if pressEnter {
+            // send_text delivers as a bracketed paste, so a trailing CR is
+            // consumed as pasted newline text by TUI composers (agent CLIs).
+            // Deliver the text, then submit with a real Return keypress.
+            invoke("surface.send_text", [
+                "surface_id": surfaceId,
+                "text": text,
+            ])
+            invoke("surface.send_key", [
+                "surface_id": surfaceId,
+                "key": "Return",
+            ])
+        } else {
+            // Terminal-mode Return is CR. sendNamedKey "Return" also works
+            // but one send_text is atomic, so append CR directly.
+            invoke("surface.send_text", [
+                "surface_id": surfaceId,
+                "text": text + "\r",
+            ])
+        }
     }
 
     @objc private func handleReactGrabDidCopySelection(_ notification: Notification) {
