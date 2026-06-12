@@ -1,7 +1,7 @@
 ---
 title: "feat: Live Changes panel with PR sync"
 type: feat
-status: active
+status: completed
 date: 2026-06-11
 deepened: 2026-06-11
 origin: docs/brainstorms/2026-06-11-changes-panel-requirements.md
