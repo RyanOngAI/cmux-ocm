@@ -122,6 +122,33 @@ struct GitChangesCreatePRTests {
         ))
     }
 
+    @Test func headerVisibilityWithConfiguredBaseOverrides() {
+        // cmux.changes.base = "myfork/main": on local main, the short-name
+        // match treats it as the default branch — hidden.
+        #expect(!GitChangesPRHeaderLogic.isHeaderVisible(
+            phase: .ready, branch: "main", baseRef: "myfork/main",
+            hasGitHubRemote: true, pollingEnabled: true
+        ))
+        // Feature branch against a fork base — visible.
+        #expect(GitChangesPRHeaderLogic.isHeaderVisible(
+            phase: .ready, branch: "feat/topic", baseRef: "myfork/main",
+            hasGitHubRemote: true, pollingEnabled: true
+        ))
+        // Slashed LOCAL branch as the configured base: being on the base
+        // branch itself hides the header (full-ref match, R14).
+        #expect(!GitChangesPRHeaderLogic.isHeaderVisible(
+            phase: .ready, branch: "release/2.0", baseRef: "release/2.0",
+            hasGitHubRemote: true, pollingEnabled: true
+        ))
+        // On a branch whose name collides with the base's LAST path
+        // component only via multi-slash short-naming, stay visible: the
+        // short form of "team/release/2.0" is "release/2.0", not "2.0".
+        #expect(GitChangesPRHeaderLogic.isHeaderVisible(
+            phase: .ready, branch: "2.0", baseRef: "team/release/2.0",
+            hasGitHubRemote: true, pollingEnabled: true
+        ))
+    }
+
     @Test func headerHiddenInDegradedMode() {
         #expect(!GitChangesPRHeaderLogic.isHeaderVisible(
             phase: .degraded, branch: "feat/topic", baseRef: nil,

@@ -6365,11 +6365,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                         identity: identity
                     )
                 }
-                // A click on a different file arrived mid-launch: replay it
-                // now (in-page jump when the identity still matches, CLI
-                // relaunch otherwise) instead of dropping it.
+                // A click arrived mid-launch: replay it now (in-page jump
+                // when the identity still matches, CLI relaunch otherwise)
+                // instead of dropping it. A same-file click is only
+                // satisfied by a SUCCESSFUL launch — after a failed one it
+                // must replay too, or the click dies with just a beep.
                 if let pending = delegate.changesDiffViewerPendingRequests.removeValue(forKey: workspaceId),
-                   pending.filePath != filePath {
+                   pending.filePath != filePath || terminationStatus != 0 {
                     _ = delegate.openBranchDiffViewer(
                         workspaceId: workspaceId,
                         filePath: pending.filePath,
@@ -9113,7 +9115,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         else { return }
 
         let controller = TerminalController.shared
-        let invoke: (String, [String: Any]) -> Void = { method, params in
+        // Returns whether the call succeeded (response carries no "error").
+        @discardableResult
+        func invoke(_ method: String, _ params: [String: Any]) -> Bool {
             let payload: [String: Any] = [
                 "id": UUID().uuidString,
                 "method": method,
@@ -9121,22 +9125,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             ]
             guard let data = try? JSONSerialization.data(withJSONObject: payload),
                   let line = String(data: data, encoding: .utf8)
-            else { return }
-            _ = controller.handleSocketLine(line)
+            else { return false }
+            let response = controller.handleSocketLine(line)
+            guard let responseData = response.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+            else { return false }
+            return object["error"] == nil
         }
         let pressEnter = notification.userInfo?["pressEnter"] as? Bool ?? false
         if pressEnter {
             // send_text delivers as a bracketed paste, so a trailing CR is
             // consumed as pasted newline text by TUI composers (agent CLIs).
             // Deliver the text, then submit with a real Return keypress.
-            invoke("surface.send_text", [
+            // Partial failure handling: no keypress when the paste failed
+            // (nothing to submit); a CR retry via send_text when only the
+            // keypress failed, so the prompt never sits unsubmitted while
+            // the header shows "prompt sent".
+            guard invoke("surface.send_text", [
                 "surface_id": surfaceId,
                 "text": text,
-            ])
-            invoke("surface.send_key", [
+            ]) else { return }
+            if !invoke("surface.send_key", [
                 "surface_id": surfaceId,
                 "key": "Return",
-            ])
+            ]) {
+                invoke("surface.send_text", [
+                    "surface_id": surfaceId,
+                    "text": "\r",
+                ])
+            }
         } else {
             // Terminal-mode Return is CR. sendNamedKey "Return" also works
             // but one send_text is atomic, so append CR directly.

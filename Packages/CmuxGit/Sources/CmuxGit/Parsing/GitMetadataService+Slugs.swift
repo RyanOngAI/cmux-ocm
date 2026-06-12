@@ -93,10 +93,15 @@ extension GitMetadataService {
         return normalizedGitHubRepositorySlug(url.path)
     }
 
-    /// `github.com`, `*.github.com`, or an SSH alias starting with `github`
-    /// (the common `github-personal` / `github-work` convention).
+    /// `github.com`, `*.github.com`, `github.com-*` aliases, or an undotted
+    /// alias starting with `github` (the `github-personal` / `github-work`
+    /// convention). Dotted hosts that merely start with "github" are rejected:
+    /// `github.mycorp.com` is the GitHub Enterprise hostname convention and
+    /// `github.com.attacker.net` is a lookalike — neither is github.com.
     nonisolated static func isGitHubLikeHost(_ host: String) -> Bool {
-        host == "github.com" || host.hasSuffix(".github.com") || host.hasPrefix("github")
+        if host == "github.com" || host.hasSuffix(".github.com") { return true }
+        if host.hasPrefix("github.com-") { return true }
+        return host.hasPrefix("github") && !host.contains(".")
     }
 
     /// The `owner/name` slug for a GitHub pull-request URL, or `nil` for a

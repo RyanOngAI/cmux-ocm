@@ -214,9 +214,10 @@ nonisolated enum GitChangesPRHeaderLogic {
     }
 
     /// Short name of the resolved base ref: `origin/main` → `main`, local
-    /// `main` stays `main`. The store's base resolver only emits
-    /// `origin/<default>` (origin/HEAD symref) or a local `main`/`master`,
-    /// so dropping the first slash component is exact.
+    /// `main` stays `main`. Auto-detected bases are `remote/<default>` or a
+    /// local `main`/`master`; `cmux.changes.base` overrides can be any
+    /// commit-ish (slashed local branches, tags), so visibility checks
+    /// compare against BOTH this short form and the full ref.
     static func defaultBranchShortName(baseRef: String) -> String {
         guard let slash = baseRef.firstIndex(of: "/") else { return baseRef }
         return String(baseRef[baseRef.index(after: slash)...])
@@ -236,7 +237,9 @@ nonisolated enum GitChangesPRHeaderLogic {
     ) -> Bool {
         guard phase == .ready, let baseRef, let branch, branch != "HEAD" else { return false }
         guard hasGitHubRemote, pollingEnabled else { return false }
-        return branch != defaultBranchShortName(baseRef: baseRef)
+        // "On the base branch" = the full ref (slashed local-branch bases
+        // like `release/2.0`) or its short form (`myfork/main` → `main`).
+        return branch != baseRef && branch != defaultBranchShortName(baseRef: baseRef)
     }
 
     /// Picks the workspace's PR entry for the current branch out of the
