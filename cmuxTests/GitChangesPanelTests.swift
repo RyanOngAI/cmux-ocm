@@ -75,7 +75,11 @@ struct GitChangesPanelTests {
     }
 
     @MainActor
-    @Test func fileExplorerStateRestoresChangesModeFromDefaults() {
+    @Test func fileExplorerStateFallsBackFromChangesModeToFiles() {
+        // Changes is no longer a standalone sidebar tab — it lives as the docked
+        // bottom half of the Files tab (and as an openable pane). A stored or
+        // requested `.changes` mode must therefore resolve to `.files`, never
+        // leave the sidebar stranded on a tab the mode bar can't switch away from.
         let defaults = UserDefaults.standard
         let modeKey = "rightSidebar.mode"
         let savedMode = defaults.string(forKey: modeKey)
@@ -88,8 +92,11 @@ struct GitChangesPanelTests {
         }
 
         defaults.set(RightSidebarMode.changes.rawValue, forKey: modeKey)
+        #expect(FileExplorerState().mode == .files)
+
         let state = FileExplorerState()
-        #expect(state.mode == .changes)
+        state.mode = .changes
+        #expect(state.mode == .files)
     }
 
     @Test func sessionToolPanelSnapshotRoundTripsChanges() throws {
