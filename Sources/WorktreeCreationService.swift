@@ -66,7 +66,7 @@ enum WorktreeCreationService {
         //    checked out branch's commits. Shared with the Changes panel's diff
         //    base (`GitDefaultBranchResolver`) so the new worktree shows no
         //    changes. Falls back to `HEAD` only when no default branch resolves.
-        let resolution = await GitDefaultBranchResolver.resolveBaseRef { arguments in
+        let resolution = await GitDefaultBranchResolver().resolveBaseRef { arguments in
             guard let result = try? await runGit(arguments, in: root.path) else { return nil }
             return GitDefaultBranchResolver.CommandResult(
                 exitStatus: result.status,

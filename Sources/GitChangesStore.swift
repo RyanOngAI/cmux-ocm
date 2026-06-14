@@ -1026,7 +1026,7 @@ extension GitChangesStore {
         // Default-branch base resolution is shared with worktree creation
         // (`GitDefaultBranchResolver`) so a worktree branched off this ref shows
         // an empty diff here. A process-level failure still aborts the refresh.
-        let baseResolution = await GitDefaultBranchResolver.resolveBaseRef { arguments in
+        let baseResolution = await GitDefaultBranchResolver().resolveBaseRef { arguments in
             guard let result = await runGit(arguments, in: repoRoot) else { return nil }
             return GitDefaultBranchResolver.CommandResult(
                 exitStatus: result.exitStatus,

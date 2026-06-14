@@ -8,7 +8,9 @@ import Foundation
 ///
 /// The resolver makes no assumptions about how git is invoked: callers inject a
 /// `runGit` closure, so it stays pure and unit-testable with a stub.
-public enum GitDefaultBranchResolver {
+public struct GitDefaultBranchResolver {
+    public init() {}
+
     /// One git invocation's outcome: the process exit status plus the trimmed
     /// first line of stdout (`""` when stdout was empty).
     public struct CommandResult: Sendable, Equatable {
@@ -38,7 +40,7 @@ public enum GitDefaultBranchResolver {
     ///
     /// - Parameter runGit: runs `git <arguments>` in the target repository and
     ///   returns the result, or `nil` on a process-level failure.
-    public static func resolveBaseRef(
+    public func resolveBaseRef(
         runGit: (_ arguments: [String]) async -> CommandResult?
     ) async -> Resolution {
         // 1. Per-repo override. An unresolvable override falls through to

@@ -26,7 +26,7 @@ struct GitDefaultBranchResolverTests {
             "config --get cmux.changes.base": ok("myfork/main"),
             "rev-parse --verify --quiet myfork/main^{commit}": ok("deadbeef"),
         ])
-        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: run)
+        #expect(await GitDefaultBranchResolver().resolveBaseRef(runGit: run)
             == .resolved(baseRef: "myfork/main"))
     }
 
@@ -37,7 +37,7 @@ struct GitDefaultBranchResolverTests {
             // override verify is unlisted → status 1 → falls through.
             "symbolic-ref --quiet --short refs/remotes/origin/HEAD": ok("origin/main"),
         ])
-        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: run)
+        #expect(await GitDefaultBranchResolver().resolveBaseRef(runGit: run)
             == .resolved(baseRef: "origin/main"))
     }
 
@@ -46,7 +46,7 @@ struct GitDefaultBranchResolverTests {
         let run = stub([
             "symbolic-ref --quiet --short refs/remotes/origin/HEAD": ok("origin/trunk"),
         ])
-        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: run)
+        #expect(await GitDefaultBranchResolver().resolveBaseRef(runGit: run)
             == .resolved(baseRef: "origin/trunk"))
     }
 
@@ -55,26 +55,26 @@ struct GitDefaultBranchResolverTests {
         let mainOnly = stub([
             "rev-parse --verify --quiet refs/heads/main^{commit}": ok("deadbeef"),
         ])
-        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: mainOnly)
+        #expect(await GitDefaultBranchResolver().resolveBaseRef(runGit: mainOnly)
             == .resolved(baseRef: "main"))
 
         let masterOnly = stub([
             "rev-parse --verify --quiet refs/heads/master^{commit}": ok("deadbeef"),
         ])
-        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: masterOnly)
+        #expect(await GitDefaultBranchResolver().resolveBaseRef(runGit: masterOnly)
             == .resolved(baseRef: "master"))
     }
 
     @Test("resolves to nil when no default branch exists")
     func resolvesNilWhenNoDefault() async {
-        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: stub([:]))
+        #expect(await GitDefaultBranchResolver().resolveBaseRef(runGit: stub([:]))
             == .resolved(baseRef: nil))
     }
 
     @Test("reports a process failure when a git invocation fails")
     func reportsProcessFailure() async {
         let run: (_ arguments: [String]) async -> GitDefaultBranchResolver.CommandResult? = { _ in nil }
-        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: run) == .processFailure)
+        #expect(await GitDefaultBranchResolver().resolveBaseRef(runGit: run) == .processFailure)
     }
 
     @Test("reports a process failure at each later step of the chain")
@@ -85,7 +85,7 @@ struct GitDefaultBranchResolverTests {
             if args == ["rev-parse", "--verify", "--quiet", "myfork/main^{commit}"] { return nil }
             return GitDefaultBranchResolver.CommandResult(exitStatus: 1, firstLine: "")
         }
-        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: atOverrideVerify) == .processFailure)
+        #expect(await GitDefaultBranchResolver().resolveBaseRef(runGit: atOverrideVerify) == .processFailure)
 
         // Step 2: no override; origin/HEAD lookup fails to launch.
         let atOriginHead: (_ a: [String]) async -> GitDefaultBranchResolver.CommandResult? = { args in
@@ -93,7 +93,7 @@ struct GitDefaultBranchResolverTests {
                 ? nil
                 : GitDefaultBranchResolver.CommandResult(exitStatus: 1, firstLine: "")
         }
-        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: atOriginHead) == .processFailure)
+        #expect(await GitDefaultBranchResolver().resolveBaseRef(runGit: atOriginHead) == .processFailure)
 
         // Step 3: local-branch probe fails to launch.
         let atLocalMain: (_ a: [String]) async -> GitDefaultBranchResolver.CommandResult? = { args in
@@ -101,6 +101,6 @@ struct GitDefaultBranchResolverTests {
                 ? nil
                 : GitDefaultBranchResolver.CommandResult(exitStatus: 1, firstLine: "")
         }
-        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: atLocalMain) == .processFailure)
+        #expect(await GitDefaultBranchResolver().resolveBaseRef(runGit: atLocalMain) == .processFailure)
     }
 }
