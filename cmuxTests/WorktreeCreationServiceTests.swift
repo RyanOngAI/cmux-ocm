@@ -84,6 +84,37 @@ struct WorktreeCreationServiceTests {
         #expect(branchSha == headSha)
     }
 
+    @Test("branches off the default branch, not the current feature branch")
+    func basesWorktreeOnDefaultBranchNotCurrentHead() async throws {
+        let repo = try makeTempDirectory()
+        try git(["init", "-q", "-b", "main"], in: repo)
+        try git(["commit", "-q", "--allow-empty", "-m", "base"], in: repo)
+        let mainSha = try git(["rev-parse", "HEAD"], in: repo)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Move HEAD onto a feature branch that is ahead of main — mirroring a
+        // user who clicks "+" while on a feature branch.
+        try git(["checkout", "-q", "-b", "feature"], in: repo)
+        try git(["commit", "-q", "--allow-empty", "-m", "feature work"], in: repo)
+        let featureSha = try git(["rev-parse", "HEAD"], in: repo)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(mainSha != featureSha)
+
+        let result = try await WorktreeCreationService.createWorktree(repoRoot: repo)
+
+        // The worktree must start from the default branch (a clean slate), not
+        // inherit the feature branch's commits.
+        let branchSha = try git(["rev-parse", result.branchName], in: repo)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(branchSha == mainSha)
+        #expect(branchSha != featureSha)
+
+        // And it carries none of the feature branch's changes (empty diff vs main),
+        // so the Changes panel shows nothing for a freshly created worktree.
+        let diff = try git(["diff", "--stat", "main", result.branchName], in: repo)
+        #expect(diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
     @Test(".cmux/ is added to info/exclude exactly once across repeated creates")
     func excludeEntryIsIdempotent() async throws {
         let repo = try makeRepoWithCommit()
