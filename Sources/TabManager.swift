@@ -1033,7 +1033,8 @@ class TabManager: ObservableObject {
         placementOverride: WorkspacePlacement? = nil,
         autoWelcomeIfNeeded: Bool = true,
         autoRefreshMetadata: Bool = true,
-        normalizeWorkspaceGroupsAfterInsert: Bool = true
+        normalizeWorkspaceGroupsAfterInsert: Bool = true,
+        worktreeBranch: String? = nil
     ) -> Workspace {
         let sourceWorkspace = selectedWorkspace
         let capturedTabs = tabs
@@ -1092,6 +1093,12 @@ class TabManager: ObservableObject {
                 initialTerminalInput: initialTerminalInput,
                 initialTerminalEnvironment: initialTerminalEnvironment
             )
+            // Set the worktree marker before the workspace is inserted into
+            // `tabs`, so the first sidebar render of its row already sees it and
+            // gates the "Remove Worktree" menu item correctly.
+            if let worktreeBranch {
+                newWorkspace.worktreeBranch = worktreeBranch
+            }
             applyCreationChromeInheritance(
                 to: newWorkspace,
                 from: sourceWorkspace ?? capturedTabs.first
@@ -1795,9 +1802,9 @@ class TabManager: ObservableObject {
                 workingDirectory: creation.worktreePath,
                 inheritWorkingDirectory: false,
                 select: true,
-                eagerLoadTerminal: false
+                eagerLoadTerminal: false,
+                worktreeBranch: creation.branchName
             )
-            workspace.worktreeBranch = creation.branchName
             addWorkspaceToGroup(workspaceId: workspace.id, groupId: groupId, placement: placement)
             return workspace
         } catch {

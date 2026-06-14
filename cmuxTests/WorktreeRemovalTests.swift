@@ -94,4 +94,18 @@ struct WorktreeRemovalTests {
         #expect(forced == .removed)
         #expect(FileManager.default.fileExists(atPath: creation.worktreePath) == false)
     }
+
+    @Test func reportsFailedWhenRepositoryCannotBeResolved() async throws {
+        // A plain temp directory that is not inside any git repository.
+        let nonRepo = try makeTempDirectory()
+
+        let outcome = await WorktreeRemovalService.removeWorktree(
+            worktreePath: nonRepo, branch: "x", force: false
+        )
+
+        guard case .failed = outcome else {
+            Issue.record("expected .failed, got \(outcome)")
+            return
+        }
+    }
 }

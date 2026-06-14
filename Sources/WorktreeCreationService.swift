@@ -153,6 +153,7 @@ enum WorktreeCreationService {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", directory] + arguments
+        process.environment = gitEnvironment()
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -165,5 +166,16 @@ enum WorktreeCreationService {
         let status = await termination.wait()
         let output = await collector.finish()
         return (status, output)
+    }
+
+    /// Process environment for git: forces the C locale for stable output and
+    /// disables interactive credential prompts that would otherwise hang the
+    /// subprocess (e.g. a private submodule fetch during `worktree add`).
+    private static func gitEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment["LANG"] = "C"
+        environment["LC_ALL"] = "C"
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        return environment
     }
 }

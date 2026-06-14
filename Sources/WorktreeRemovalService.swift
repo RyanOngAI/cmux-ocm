@@ -22,7 +22,9 @@ enum WorktreeRemovalService {
 
         var arguments = ["worktree", "remove"]
         if force { arguments.append("--force") }
-        arguments.append(worktreePath)
+        // `--` keeps a worktree path that begins with `-` from being parsed as
+        // a git flag.
+        arguments.append(contentsOf: ["--", worktreePath])
         let remove = await runGit(arguments, in: repoRoot)
         if remove.status != 0 {
             if !force, indicatesDirtyWorktree(remove.output) {
@@ -31,10 +33,13 @@ enum WorktreeRemovalService {
             return .failed(remove.output)
         }
 
-        // The worktree is gone — best-effort delete its branch. A failure here
-        // (e.g. the branch was already deleted) does not undo the removal, so
-        // the worktree is still considered removed.
-        _ = await runGit(["branch", "-D", branch], in: repoRoot)
+        // The worktree is gone — best-effort delete its branch. Use the
+        // merge-safe `-d` for a normal removal so committed-but-unmerged work is
+        // never silently discarded (the branch simply lingers if it has unmerged
+        // commits); only a user-confirmed force removal uses `-D`. `--` guards a
+        // branch name beginning with `-`. A failure here does not undo the
+        // removal, so the worktree is still considered removed.
+        _ = await runGit(["branch", force ? "-D" : "-d", "--", branch], in: repoRoot)
         return .removed
     }
 
@@ -59,6 +64,7 @@ enum WorktreeRemovalService {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", directory] + arguments
+        process.environment = gitEnvironment()
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -75,5 +81,16 @@ enum WorktreeRemovalService {
         let status = await termination.wait()
         let output = await collector.finish()
         return (status, String(data: output, encoding: .utf8) ?? "")
+    }
+
+    /// Process environment for git: forces the C locale so dirty/error
+    /// detection matches stable English output, and disables interactive
+    /// credential prompts that would otherwise hang the subprocess.
+    private static func gitEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment["LANG"] = "C"
+        environment["LC_ALL"] = "C"
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        return environment
     }
 }
