@@ -2,6 +2,11 @@
 
 All notable changes to cmux are documented here.
 
+## [Unreleased]
+
+### Added
+- Create a git worktree from a repo-backed workspace group: the group header "+" branches a fresh worktree off the repository's `HEAD` and opens it as a member workspace, with a "Remove Worktree" context-menu action. Non-repo groups keep the plain new-workspace behavior.
+
 ## [0.64.15] - 2026-06-12
 
 ### Added
