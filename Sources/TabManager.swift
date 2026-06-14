@@ -1819,11 +1819,19 @@ class TabManager: ObservableObject {
     /// Remove the git worktree backing `workspaceId` (and its branch), then
     /// close the workspace. A dirty worktree prompts for confirmation before a
     /// forced removal so uncommitted work is never discarded silently.
+    /// Per-workspace guard so a rapid double "Remove Worktree" (or a second
+    /// trigger while the dirty-confirmation dialog is open) can't launch two
+    /// concurrent removals that race to close the same workspace.
+    private var worktreeRemovalInFlightWorkspaceIds: Set<UUID> = []
+
     func removeWorktree(workspaceId: UUID) {
+        guard !worktreeRemovalInFlightWorkspaceIds.contains(workspaceId) else { return }
         guard let workspace = tabs.first(where: { $0.id == workspaceId }),
               let branch = workspace.worktreeBranch else { return }
         let worktreePath = workspace.currentDirectory
+        worktreeRemovalInFlightWorkspaceIds.insert(workspaceId)
         Task { @MainActor in
+            defer { worktreeRemovalInFlightWorkspaceIds.remove(workspaceId) }
             let outcome = await WorktreeRemovalService.removeWorktree(
                 worktreePath: worktreePath, branch: branch, force: false
             )
@@ -1851,6 +1859,21 @@ class TabManager: ObservableObject {
         closeWorkspace(workspace)
     }
 
+    /// Localized dirty-worktree removal warning with the branch name
+    /// substituted. The string catalog stores a `%@` placeholder, so the branch
+    /// must be applied via `localizedStringWithFormat` — interpolating into
+    /// `defaultValue` is ignored once the catalog provides a translation, which
+    /// would surface a literal "%@" to the user.
+    nonisolated static func dirtyWorktreeRemovalMessage(branch: String) -> String {
+        String.localizedStringWithFormat(
+            String(
+                localized: "worktree.remove.dirty.message",
+                defaultValue: "The worktree “%@” has uncommitted or untracked changes. Removing it deletes the worktree directory and its branch, discarding that work. This can’t be undone."
+            ),
+            branch
+        )
+    }
+
     private func confirmForceRemoveWorktree(branch: String) -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -1858,10 +1881,7 @@ class TabManager: ObservableObject {
             localized: "worktree.remove.dirty.title",
             defaultValue: "Remove worktree with uncommitted changes?"
         )
-        alert.informativeText = String(
-            localized: "worktree.remove.dirty.message",
-            defaultValue: "The worktree “\(branch)” has uncommitted or untracked changes. Removing it deletes the worktree directory and its branch, discarding that work. This can’t be undone."
-        )
+        alert.informativeText = TabManager.dirtyWorktreeRemovalMessage(branch: branch)
         alert.addButton(withTitle: String(
             localized: "worktree.remove.dirty.confirm",
             defaultValue: "Remove Anyway"

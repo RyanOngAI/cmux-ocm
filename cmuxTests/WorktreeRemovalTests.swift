@@ -108,4 +108,14 @@ struct WorktreeRemovalTests {
             return
         }
     }
+
+    // MARK: - Dirty-confirmation message
+
+    @Test func dirtyRemovalMessageSubstitutesBranchInsteadOfShowingPlaceholder() {
+        // The string catalog stores a "%@" placeholder; the message must apply
+        // the branch via localizedStringWithFormat, not leave a literal "%@".
+        let message = TabManager.dirtyWorktreeRemovalMessage(branch: "amsterdam")
+        #expect(message.contains("amsterdam"))
+        #expect(!message.contains("%@"))
+    }
 }

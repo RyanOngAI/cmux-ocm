@@ -76,4 +76,31 @@ struct GitDefaultBranchResolverTests {
         let run: (_ arguments: [String]) async -> GitDefaultBranchResolver.CommandResult? = { _ in nil }
         #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: run) == .processFailure)
     }
+
+    @Test("reports a process failure at each later step of the chain")
+    func reportsProcessFailureAtEachStep() async {
+        // Step 1b: configured override present, but its commit-verify fails to launch.
+        let atOverrideVerify: (_ a: [String]) async -> GitDefaultBranchResolver.CommandResult? = { args in
+            if args == ["config", "--get", "cmux.changes.base"] { return self.ok("myfork/main") }
+            if args == ["rev-parse", "--verify", "--quiet", "myfork/main^{commit}"] { return nil }
+            return GitDefaultBranchResolver.CommandResult(exitStatus: 1, firstLine: "")
+        }
+        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: atOverrideVerify) == .processFailure)
+
+        // Step 2: no override; origin/HEAD lookup fails to launch.
+        let atOriginHead: (_ a: [String]) async -> GitDefaultBranchResolver.CommandResult? = { args in
+            args == ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]
+                ? nil
+                : GitDefaultBranchResolver.CommandResult(exitStatus: 1, firstLine: "")
+        }
+        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: atOriginHead) == .processFailure)
+
+        // Step 3: local-branch probe fails to launch.
+        let atLocalMain: (_ a: [String]) async -> GitDefaultBranchResolver.CommandResult? = { args in
+            args == ["rev-parse", "--verify", "--quiet", "refs/heads/main^{commit}"]
+                ? nil
+                : GitDefaultBranchResolver.CommandResult(exitStatus: 1, firstLine: "")
+        }
+        #expect(await GitDefaultBranchResolver.resolveBaseRef(runGit: atLocalMain) == .processFailure)
+    }
 }

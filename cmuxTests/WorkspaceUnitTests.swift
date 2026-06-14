@@ -7364,6 +7364,22 @@ final class WorktreeBranchPersistenceTests: XCTestCase {
         XCTAssertEqual(decoded.worktreeBranch, "atlanta")
     }
 
+    func testWorktreeBranchSurvivesRestoreSessionSnapshot() throws {
+        // Exercises the restore assignment (Workspace.restoreSessionSnapshot),
+        // not just the Codable layer — the path that re-marks a worktree
+        // workspace so "Remove Worktree" stays available after a session restore.
+        let original = Workspace(worktreeBranch: "amsterdam")
+        let snapshot = original.sessionSnapshot(includeScrollback: false)
+        let decoded = try JSONDecoder().decode(
+            SessionWorkspaceSnapshot.self,
+            from: try JSONEncoder().encode(snapshot)
+        )
+
+        let restored = Workspace()
+        _ = restored.restoreSessionSnapshot(decoded)
+        XCTAssertEqual(restored.worktreeBranch, "amsterdam")
+    }
+
     func testNonWorktreeWorkspaceOmitsBranchForBackwardCompatibility() throws {
         let workspace = Workspace()
         let snapshot = workspace.sessionSnapshot(includeScrollback: false)
