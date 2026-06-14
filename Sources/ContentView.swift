@@ -2696,13 +2696,14 @@ struct ContentView: View {
     }
 
     /// Keeps the sidebar's Changes-panel observer registration in sync with
-    /// visibility (sidebar shown + `.changes` mode), the selected workspace,
-    /// and its root (cwd / remote transitions). Called from the same sites
-    /// that drive `syncFileExplorerDirectory()` — the Changes store attaches
+    /// visibility (sidebar shown + a mode that renders Changes), the selected
+    /// workspace, and its root (cwd / remote transitions). Called from the
+    /// same sites that drive `syncFileExplorerDirectory()` — the Changes store attaches
     /// through TabManager's registry rather than the file-explorer sync path
     /// (see `FileExplorerRootSyncPolicy`).
     private func syncGitChangesObserver() {
-        let visibleTab: Workspace? = (fileExplorerState.isVisible && fileExplorerState.mode == .changes)
+        let rendersChanges = fileExplorerState.mode == .files || fileExplorerState.mode == .changes
+        let visibleTab: Workspace? = (fileExplorerState.isVisible && rendersChanges)
             ? tabManager.tabs.first(where: { $0.id == tabManager.selectedTabId })
             : nil
         guard let tab = visibleTab else {

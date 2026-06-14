@@ -435,11 +435,15 @@ struct RightSidebarPanelView: View {
     private var contentForMode: some View {
         switch fileExplorerState.mode {
         case .files:
-            FileExplorerPanelView(
+            RightSidebarFilesAndChangesView(
+                tabManager: tabManager,
                 store: fileExplorerStore,
                 state: fileExplorerState,
+                gitChangesStore: gitChangesStore,
+                workspaceId: workspaceId,
                 onOpenFilePreview: onOpenFilePreview,
-                presentation: .files
+                onOpenChangedFile: onOpenChangedFile,
+                onOpenChangesAsPane: { onOpenAsPane(.changes) }
             )
         case .find:
             FileExplorerPanelView(
@@ -517,6 +521,81 @@ struct RightSidebarPanelView: View {
             focusFirstItem: false,
             preferredWindow: window
         )
+    }
+}
+
+private struct RightSidebarFilesAndChangesView: View {
+    @ObservedObject var tabManager: TabManager
+    @ObservedObject var store: FileExplorerStore
+    @ObservedObject var state: FileExplorerState
+    let gitChangesStore: GitChangesStore?
+    let workspaceId: UUID?
+    let onOpenFilePreview: (String) -> Void
+    let onOpenChangedFile: (GitChangedFile) -> Void
+    let onOpenChangesAsPane: () -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            let dividerHeight: CGFloat = 1
+            let availableHeight = max(0, proxy.size.height - dividerHeight)
+            let filesHeight = floor(availableHeight / 2)
+            let changesHeight = availableHeight - filesHeight
+
+            VStack(spacing: 0) {
+                FileExplorerPanelView(
+                    store: store,
+                    state: state,
+                    onOpenFilePreview: onOpenFilePreview,
+                    presentation: .files
+                )
+                .frame(height: filesHeight)
+
+                Divider()
+                    .frame(height: dividerHeight)
+
+                VStack(spacing: 0) {
+                    changesHeader
+                    GitChangesPanelHostView(
+                        store: gitChangesStore,
+                        workspace: tabManager.tabs.first(where: { $0.id == workspaceId }),
+                        onOpenFile: onOpenChangedFile
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(height: changesHeight)
+            }
+        }
+    }
+
+    private var changesHeader: some View {
+        HStack(spacing: 6) {
+            Image(systemName: RightSidebarMode.changes.symbolName)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.secondary)
+            Text(RightSidebarMode.changes.label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.secondary)
+            Spacer(minLength: 0)
+            Button(action: onOpenChangesAsPane) {
+                Image(systemName: "rectangle.split.2x1")
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.secondary)
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
+            .safeHelp(String(localized: "rightSidebar.openAsPane.tooltip", defaultValue: "Open as pane"))
+            .accessibilityLabel(
+                String.localizedStringWithFormat(
+                    String(localized: "rightSidebar.openAsPane.accessibilityLabel", defaultValue: "Open %@ as Pane"),
+                    RightSidebarMode.changes.label
+                )
+            )
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .frame(height: 28)
+        .rightSidebarChromeBottomBorder()
     }
 }
 
