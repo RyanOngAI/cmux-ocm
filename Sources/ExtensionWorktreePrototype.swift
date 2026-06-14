@@ -83,70 +83,27 @@ final class CmuxExtensionProcessTermination: @unchecked Sendable {
     }
 }
 
+/// Demo-grade worktree entrypoint used by the extension-sidebar prototype.
+///
+/// The real git work — repo validation, `.cmux/` ignore, branch naming, and
+/// `git worktree add` — lives in ``WorktreeCreationService`` so there is exactly
+/// one worktree-creation path in cmux. This prototype only layers a throwaway
+/// sample dev server on top to demonstrate the setup-command flow.
 enum CmuxExtensionWorktreePrototype {
     static func createWorktree(projectRootPath: String) async throws -> CmuxExtensionWorktreeCreationResult {
-        try await Task.detached(priority: .userInitiated) {
-            let projectRoot = URL(fileURLWithPath: projectRootPath, isDirectory: true).standardizedFileURL
-            try FileManager.default.createDirectory(at: projectRoot, withIntermediateDirectories: true)
-            try await ensureGitRepository(at: projectRoot)
-            try await ensureCmuxWorktreeDirectoryIsLocallyIgnored(projectRoot: projectRoot)
+        let creation = try await WorktreeCreationService.createWorktree(repoRoot: projectRootPath)
+        let worktree = URL(fileURLWithPath: creation.worktreePath, isDirectory: true)
+        let projectName = URL(fileURLWithPath: projectRootPath, isDirectory: true)
+            .standardizedFileURL.lastPathComponent
+        try writeSampleDevServerFiles(in: worktree, projectName: projectName)
 
-            let branchName = "cmux-sidebar-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8).lowercased())"
-            let worktreeRoot = projectRoot
-                .appendingPathComponent(".cmux", isDirectory: true)
-                .appendingPathComponent("worktrees", isDirectory: true)
-            try FileManager.default.createDirectory(at: worktreeRoot, withIntermediateDirectories: true)
-            let worktree = worktreeRoot.appendingPathComponent(branchName, isDirectory: true)
-            try await run("git", ["-C", projectRoot.path, "worktree", "add", "-b", branchName, worktree.path, "HEAD"])
-            try writeSampleDevServerFiles(in: worktree, projectName: projectRoot.lastPathComponent)
-
-            let port = 4_100 + abs(branchName.hashValue % 800)
-            let samplePath = shellEscaped(worktree.appendingPathComponent("cmux-sample-dev", isDirectory: true).path)
-            return CmuxExtensionWorktreeCreationResult(
-                worktreePath: worktree.path,
-                workspaceTitle: branchName,
-                setupCommand: "cd \(samplePath) && python3 -m http.server \(port)"
-            )
-        }.value
-    }
-
-    private static func ensureGitRepository(at projectRoot: URL) async throws {
-        if (try? await run("git", ["-C", projectRoot.path, "rev-parse", "--is-inside-work-tree"])) != nil {
-            return
-        }
-        throw NSError(
-            domain: "CmuxExtensionWorktreePrototype",
-            code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "Project root is not a git repository."]
+        let port = 4_100 + abs(creation.branchName.hashValue % 800)
+        let samplePath = shellEscaped(worktree.appendingPathComponent("cmux-sample-dev", isDirectory: true).path)
+        return CmuxExtensionWorktreeCreationResult(
+            worktreePath: creation.worktreePath,
+            workspaceTitle: creation.branchName,
+            setupCommand: "cd \(samplePath) && python3 -m http.server \(port)"
         )
-    }
-
-    private static func ensureCmuxWorktreeDirectoryIsLocallyIgnored(projectRoot: URL) async throws {
-        let output = try await runCapturingOutput("git", ["-C", projectRoot.path, "rev-parse", "--git-path", "info/exclude"])
-        guard let rawPath = String(data: output, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !rawPath.isEmpty else {
-            throw NSError(
-                domain: "CmuxExtensionWorktreePrototype",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "Could not resolve git exclude file."]
-            )
-        }
-
-        let excludeURL = rawPath.hasPrefix("/")
-            ? URL(fileURLWithPath: rawPath).standardizedFileURL
-            : projectRoot.appendingPathComponent(rawPath).standardizedFileURL
-        try FileManager.default.createDirectory(at: excludeURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let existing = (try? String(contentsOf: excludeURL, encoding: .utf8)) ?? ""
-        let alreadyIgnored = existing
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .contains { $0 == ".cmux" || $0 == ".cmux/" }
-        guard !alreadyIgnored else { return }
-
-        let separator = existing.isEmpty || existing.hasSuffix("\n") ? "" : "\n"
-        let next = existing + separator + "# cmux extension worktrees\n.cmux/\n"
-        try next.write(to: excludeURL, atomically: true, encoding: .utf8)
     }
 
     private static func writeSampleDevServerFiles(in worktree: URL, projectName: String) throws {
@@ -167,39 +124,6 @@ enum CmuxExtensionWorktreePrototype {
         </html>
         """
         try html.write(to: sample.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
-    }
-
-    private static func run(_ executable: String, _ arguments: [String]) async throws {
-        _ = try await runCapturingOutput(executable, arguments)
-    }
-
-    private static func runCapturingOutput(_ executable: String, _ arguments: [String]) async throws -> Data {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [executable] + arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        let termination = CmuxExtensionProcessTermination()
-        process.terminationHandler = { process in
-            termination.complete(process.terminationStatus)
-        }
-        try process.run()
-        let outputCollector = CmuxExtensionPipeOutputCollector(fileHandle: pipe.fileHandleForReading)
-        let terminationStatus = await termination.wait()
-        let outputData = await outputCollector.finish()
-        guard terminationStatus == 0 else {
-            let details = String(data: outputData, encoding: .utf8) ?? "command failed"
-            throw NSError(
-                domain: "CmuxExtensionWorktreePrototype",
-                code: Int(terminationStatus),
-                userInfo: [
-                    NSLocalizedDescriptionKey: "Could not create worktree.",
-                    "CmuxExtensionWorktreePrototypeDetails": details
-                ]
-            )
-        }
-        return outputData
     }
 
     private static func shellEscaped(_ value: String) -> String {
