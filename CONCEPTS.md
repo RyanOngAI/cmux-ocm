@@ -13,6 +13,9 @@ The addressable unit of content inside a Workspace — one terminal or browser p
 ### Agent Session
 A terminal Surface that cmux knows is running a coding agent, registered through the agent hooks rather than inferred. Automation that injects prompts targets Agent Sessions only — text sent to a plain shell would execute as commands — so "is this an Agent Session?" is a trust boundary, not a cosmetic label.
 
+### Worktree Workspace
+A Workspace whose working directory is a dedicated git worktree, branched off the repository's default branch so it starts as a clean slate, and removable as a unit — its worktree directory and branch together. Distinct from a plain Workspace, which shares or inherits an existing directory; created from a repo-backed workspace group rather than a bare new tab.
+
 ## Flagged ambiguities
 
 - "surface" and "panel" are used interchangeably in code for the same unit; the socket protocol and user-facing automation say *surface*. No settled retirement yet.

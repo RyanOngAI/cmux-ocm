@@ -58,6 +58,14 @@ extension RightSidebarMode {
     var canOpenAsPane: Bool {
         Self.paneModes.contains(self)
     }
+
+    /// Whether this mode is offered as a standalone tab in the right-sidebar
+    /// mode bar. `.changes` is excluded: it renders as the docked bottom half of
+    /// the Files tab (and as an openable pane), so a separate Changes tab would
+    /// duplicate it. It stays a valid `paneModes` entry.
+    var isSelectableSidebarTab: Bool {
+        self != .changes
+    }
 }
 
 nonisolated enum RightSidebarContentMountPolicy {
@@ -229,8 +237,8 @@ struct RightSidebarPanelView: View {
         FeedCoordinator.shared.store?.pending.count ?? 0
     }
 
-    private var availableModes: [RightSidebarMode] {
-        RightSidebarMode.availableModes(feedEnabled: feedEnabled, dockEnabled: dockEnabled)
+    private var modeBarTabs: [RightSidebarMode] {
+        RightSidebarMode.modeBarTabs(feedEnabled: feedEnabled, dockEnabled: dockEnabled)
     }
 
     var body: some View {
@@ -292,7 +300,7 @@ struct RightSidebarPanelView: View {
             WindowDragHandleView()
 
             HStack(spacing: RightSidebarChromeMetrics.headerControlSpacing) {
-                ForEach(availableModes, id: \.rawValue) { mode in
+                ForEach(modeBarTabs, id: \.rawValue) { mode in
                     let shortcut = mode.shortcutAction.map { KeyboardShortcutSettings.shortcut(for: $0) } ?? .unbound
                     ModeBarButton(
                         mode: mode,

@@ -7324,7 +7324,10 @@ final class ExtensionWorktreePrototypeTests: XCTestCase {
         let result = try await CmuxExtensionWorktreePrototype.createWorktree(projectRootPath: projectRoot.path)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.worktreePath))
-        XCTAssertTrue(result.workspaceTitle.hasPrefix("cmux-sidebar-"))
+        // The prototype now delegates naming to WorktreeCreationService, which
+        // uses friendly codenames and places the worktree under .cmux/worktrees.
+        XCTAssertFalse(result.workspaceTitle.isEmpty)
+        XCTAssertTrue(result.worktreePath.hasSuffix("/.cmux/worktrees/\(result.workspaceTitle)"))
         let status = try runGit(["status", "--short", "--untracked-files=all"], in: projectRoot)
         XCTAssertEqual(status.trimmingCharacters(in: .whitespacesAndNewlines), "")
     }
@@ -7346,5 +7349,48 @@ final class ExtensionWorktreePrototypeTests: XCTestCase {
             throw NSError(domain: "ExtensionWorktreePrototypeTests", code: Int(process.terminationStatus))
         }
         return output
+    }
+}
+
+@MainActor
+final class WorktreeBranchPersistenceTests: XCTestCase {
+    func testWorktreeBranchIsCapturedAndRoundTripsThroughCoding() throws {
+        let workspace = Workspace(worktreeBranch: "atlanta")
+        let snapshot = workspace.sessionSnapshot(includeScrollback: false)
+        XCTAssertEqual(snapshot.worktreeBranch, "atlanta")
+
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(SessionWorkspaceSnapshot.self, from: data)
+        XCTAssertEqual(decoded.worktreeBranch, "atlanta")
+    }
+
+    func testWorktreeBranchSurvivesRestoreSessionSnapshot() throws {
+        // Exercises the restore assignment (Workspace.restoreSessionSnapshot),
+        // not just the Codable layer — the path that re-marks a worktree
+        // workspace so "Remove Worktree" stays available after a session restore.
+        let original = Workspace(worktreeBranch: "amsterdam")
+        let snapshot = original.sessionSnapshot(includeScrollback: false)
+        let decoded = try JSONDecoder().decode(
+            SessionWorkspaceSnapshot.self,
+            from: try JSONEncoder().encode(snapshot)
+        )
+
+        let restored = Workspace()
+        _ = restored.restoreSessionSnapshot(decoded)
+        XCTAssertEqual(restored.worktreeBranch, "amsterdam")
+    }
+
+    func testNonWorktreeWorkspaceOmitsBranchForBackwardCompatibility() throws {
+        let workspace = Workspace()
+        let snapshot = workspace.sessionSnapshot(includeScrollback: false)
+        XCTAssertNil(snapshot.worktreeBranch)
+
+        // The synthesized encoder omits nil optionals, so snapshots that predate
+        // the field decode cleanly to nil — older sessions restore without it.
+        let data = try JSONEncoder().encode(snapshot)
+        let json = String(data: data, encoding: .utf8) ?? ""
+        XCTAssertFalse(json.contains("worktreeBranch"))
+        let decoded = try JSONDecoder().decode(SessionWorkspaceSnapshot.self, from: data)
+        XCTAssertNil(decoded.worktreeBranch)
     }
 }

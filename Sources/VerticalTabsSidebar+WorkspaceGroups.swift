@@ -122,7 +122,9 @@ extension VerticalTabsSidebar {
                 guard let tabManager else { return }
                 let resolved = placement
                     ?? UserDefaultsSettingsClient(defaults: .standard).value(for: SettingCatalog().workspaceGroups.newWorkspacePlacement)
-                _ = tabManager.createWorkspaceInGroup(groupId: groupId, placement: resolved)
+                Task { @MainActor in
+                    await tabManager.createWorktreeWorkspaceInGroup(groupId: groupId, placement: resolved)
+                }
             },
             onRunResolvedItem: { [weak tabManager, groupId = group.id] item in
                 guard let tabManager else { return }

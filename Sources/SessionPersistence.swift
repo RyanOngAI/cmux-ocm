@@ -1823,6 +1823,9 @@ struct SessionWorkspaceSnapshot: Codable, Sendable {
     var notifications: [SessionNotificationSnapshot]? = nil
     var terminalScrollBarHidden: Bool?
     var currentDirectory: String
+    /// Branch name when this workspace is a cmux-created git worktree; `nil`
+    /// otherwise. Optional + default keeps older snapshots decoding cleanly.
+    var worktreeBranch: String? = nil
     var focusedPanelId: UUID?
     var layout: SessionWorkspaceLayoutSnapshot
     /// `WorkspaceLayoutMode` raw value; absent in pre-canvas snapshots

@@ -34,6 +34,25 @@ struct GitChangesPanelTests {
         #expect(RightSidebarMode.changes.canOpenAsPane)
     }
 
+    @Test func changesModeIsNotASelectableSidebarTab() {
+        #expect(!RightSidebarMode.changes.isSelectableSidebarTab)
+        // The mode bar (and the palette's mode-switch entries) omit Changes...
+        #expect(
+            !RightSidebarMode.modeBarTabs(feedEnabled: true, dockEnabled: true)
+                .contains(.changes)
+        )
+        // ...while the other modes remain selectable tabs.
+        for mode in [RightSidebarMode.files, .find, .sessions] {
+            #expect(mode.isSelectableSidebarTab)
+            #expect(RightSidebarMode.modeBarTabs(feedEnabled: false, dockEnabled: false).contains(mode))
+        }
+        // Changes stays available so open-as-pane keeps working.
+        #expect(
+            RightSidebarMode.availableModes(feedEnabled: false, dockEnabled: false)
+                .contains(.changes)
+        )
+    }
+
     @Test func fileExplorerStoreDoesNotSyncForChangesMode() {
         // The Changes panel attaches its store through TabManager's registry;
         // the file-explorer store must stay parked while Changes is showing.
@@ -75,7 +94,11 @@ struct GitChangesPanelTests {
     }
 
     @MainActor
-    @Test func fileExplorerStateRestoresChangesModeFromDefaults() {
+    @Test func fileExplorerStateFallsBackFromChangesModeToFiles() {
+        // Changes is no longer a standalone sidebar tab — it lives as the docked
+        // bottom half of the Files tab (and as an openable pane). A stored or
+        // requested `.changes` mode must therefore resolve to `.files`, never
+        // leave the sidebar stranded on a tab the mode bar can't switch away from.
         let defaults = UserDefaults.standard
         let modeKey = "rightSidebar.mode"
         let savedMode = defaults.string(forKey: modeKey)
@@ -88,8 +111,11 @@ struct GitChangesPanelTests {
         }
 
         defaults.set(RightSidebarMode.changes.rawValue, forKey: modeKey)
+        #expect(FileExplorerState().mode == .files)
+
         let state = FileExplorerState()
-        #expect(state.mode == .changes)
+        state.mode = .changes
+        #expect(state.mode == .files)
     }
 
     @Test func sessionToolPanelSnapshotRoundTripsChanges() throws {

@@ -14391,6 +14391,12 @@ struct TabItemView: View, Equatable {
         }
         .disabled(targetIds.isEmpty)
 
+        if !isMulti, tab.worktreeBranch != nil {
+            Button(String(localized: "contextMenu.removeWorktree", defaultValue: "Remove Worktree")) {
+                tabManager.removeWorktree(workspaceId: tab.id)
+            }
+        }
+
         Divider()
 
         if let key = closeWorkspaceShortcut.keyEquivalent {

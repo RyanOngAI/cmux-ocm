@@ -847,6 +847,7 @@ private struct GitChangesFileRow: View, Equatable {
                 }
                 Spacer(minLength: 8)
                 trailingCounts
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 3.5)
@@ -870,10 +871,12 @@ private struct GitChangesFileRow: View, Equatable {
             Text(String(localized: "changes.row.submodule", defaultValue: "submodule"))
                 .font(.system(size: 10))
                 .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                .lineLimit(1)
         } else if file.isBinary {
             Text(String(localized: "changes.row.binary", defaultValue: "binary"))
                 .font(.system(size: 10))
                 .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                .lineLimit(1)
         } else if let added = file.addedLines, let deleted = file.deletedLines {
             HStack(spacing: 4) {
                 Text(verbatim: "+\(added)")
@@ -882,6 +885,7 @@ private struct GitChangesFileRow: View, Equatable {
                     .foregroundColor(Color(nsColor: .systemRed))
             }
             .font(.system(size: 10.5).monospacedDigit())
+            .lineLimit(1)
         }
     }
 }

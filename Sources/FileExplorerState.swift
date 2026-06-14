@@ -89,6 +89,9 @@ final class FileExplorerState: ObservableObject {
     }
 
     private static func availableMode(_ mode: RightSidebarMode, defaults: UserDefaults) -> RightSidebarMode {
-        mode.isAvailable(defaults: defaults) ? mode : .files
+        // Only modes the mode bar can switch to may be the active sidebar mode.
+        // `.changes` is not a standalone tab (it lives in the Files tab and as a
+        // pane), so it resolves to `.files` rather than stranding the sidebar.
+        (mode.isAvailable(defaults: defaults) && mode.isSelectableSidebarTab) ? mode : .files
     }
 }

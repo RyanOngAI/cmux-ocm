@@ -154,6 +154,7 @@ extension Workspace {
             hasUnreadIndicator: hasWorkspaceUnreadIndicator,
             notifications: workspaceNotificationSnapshots.isEmpty ? nil : workspaceNotificationSnapshots,
             currentDirectory: currentDirectory,
+            worktreeBranch: worktreeBranch,
             focusedPanelId: focusedPanelId,
             layout: layout,
             layoutMode: layoutMode.rawValue,
@@ -204,6 +205,7 @@ extension Workspace {
         if !normalizedCurrentDirectory.isEmpty {
             currentDirectory = normalizedCurrentDirectory
         }
+        worktreeBranch = snapshot.worktreeBranch
 
         let panelSnapshotsById = Dictionary(uniqueKeysWithValues: snapshot.panels.map { ($0.id, $0) })
         let leafEntries: [SessionPaneRestoreEntry] = {
@@ -2502,6 +2504,11 @@ final class Workspace: Identifiable, ObservableObject {
             )
         }
     }
+    /// Non-nil when this workspace lives in a git worktree that cmux created;
+    /// stores the branch name so the "Remove worktree" action can delete it and
+    /// the workspace context menu can gate on worktree identity. Set once at
+    /// creation (or session restore) and not mutated afterward.
+    var worktreeBranch: String?
     @Published private(set) var extensionSidebarProjectRootPath: String?
     private var extensionSidebarProjectRootRefreshID: UInt64 = 0
     @Published private(set) var surfaceTabBarDirectory: String?
@@ -3197,7 +3204,8 @@ final class Workspace: Identifiable, ObservableObject {
         initialSurface: NewWorkspaceInitialSurface = .terminal,
         initialTerminalCommand: String? = nil,
         initialTerminalInput: String? = nil,
-        initialTerminalEnvironment: [String: String] = [:], initialDetachedSurface: DetachedSurfaceTransfer? = nil
+        initialTerminalEnvironment: [String: String] = [:], initialDetachedSurface: DetachedSurfaceTransfer? = nil,
+        worktreeBranch: String? = nil
     ) {
         self.id = UUID()
         self.portOrdinal = portOrdinal
@@ -3215,6 +3223,7 @@ final class Workspace: Identifiable, ObservableObject {
             ? trimmedWorkingDirectory
             : FileManager.default.homeDirectoryForCurrentUser.path
         self.surfaceTabBarDirectory = initialDirectory
+        self.worktreeBranch = worktreeBranch
 
         // Configure bonsplit with keepAllAlive to preserve terminal state
         // and keep split entry instantaneous.
