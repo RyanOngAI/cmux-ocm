@@ -323,6 +323,23 @@ export function App({ config, initialStatus }: ConfigProps) {
       treePath: state.treeSource?.treePathByItemId.get(target),
     });
   };
+  const scrollToFilePath = useCallback((path: string): boolean => {
+    const current = latestState.current;
+    const itemId = diffItemIdForFilePath(path, current.treeSource, current.items);
+    if (!itemId) {
+      return false;
+    }
+    codeViewRef.current?.scrollTo({ type: "item", id: itemId, align: "start", behavior: "smooth-auto" });
+    dispatch({
+      type: "set-active-item",
+      itemId,
+      treePath: current.treeSource?.treePathByItemId.get(itemId),
+    });
+    return true;
+  }, [dispatch, latestState]);
+
+  useScrollToFileBridge(scrollToFilePath);
+  useInitialFileScroll(payload.initialFile, state.treeSource, state.items, scrollToFilePath);
   const setStatus = (status: DiffViewerStatus) => {
     applyDiffViewerStatusToDocument(status);
     dispatch({ type: "set-status", status });
@@ -1470,6 +1487,74 @@ function scrollTargetForItem(itemId: string, items: DiffItem[]): string {
     return itemId;
   }
   return items[0]?.id ?? "";
+}
+
+/**
+ * Resolves a repo-root-relative file path to a rendered diff item id. Exact
+ * tree-path matches win; otherwise a suffix match covers prefixed tree paths
+ * (e.g. last-turn commit grouping). Returns null when the file is absent from
+ * the diff or not rendered yet.
+ */
+function diffItemIdForFilePath(
+  path: unknown,
+  source: FileTreeSource | null,
+  items: DiffItem[],
+): string | null {
+  if (typeof path !== "string" || path.length === 0 || !source) {
+    return null;
+  }
+  let itemId = source.pathToItemId.get(path) ?? null;
+  if (itemId == null) {
+    const suffix = `/${path}`;
+    for (const [treePath, candidate] of source.pathToItemId) {
+      if (treePath.endsWith(suffix)) {
+        itemId = candidate;
+        break;
+      }
+    }
+  }
+  if (itemId == null) {
+    return null;
+  }
+  return items.some((item) => item.id === itemId) ? itemId : null;
+}
+
+/**
+ * Exposes the in-page jump fast path so the host app can scroll an already
+ * rendered diff viewer to a file without reloading it.
+ */
+function useScrollToFileBridge(scrollToFilePath: (path: string) => boolean): void {
+  useEffect(() => {
+    window.cmuxDiffViewerScrollToFile = scrollToFilePath;
+    return () => {
+      if (window.cmuxDiffViewerScrollToFile === scrollToFilePath) {
+        delete window.cmuxDiffViewerScrollToFile;
+      }
+    };
+  }, [scrollToFilePath]);
+}
+
+/**
+ * Scrolls to the configured initial file once, re-attempting as the diff
+ * streams in. A file absent from the final diff never matches, so the viewer
+ * simply renders from the top.
+ */
+function useInitialFileScroll(
+  initialFile: unknown,
+  treeSource: FileTreeSource | null,
+  items: DiffItem[],
+  scrollToFilePath: (path: string) => boolean,
+): void {
+  const done = useRef(false);
+  const path = typeof initialFile === "string" ? initialFile : "";
+  useEffect(() => {
+    if (done.current || path === "") {
+      return;
+    }
+    if (scrollToFilePath(path)) {
+      done.current = true;
+    }
+  }, [items, path, scrollToFilePath, treeSource]);
 }
 
 function getInitialFileTreeRowCount(): number {

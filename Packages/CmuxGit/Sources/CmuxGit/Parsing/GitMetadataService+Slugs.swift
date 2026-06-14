@@ -59,29 +59,49 @@ extension GitMetadataService {
 
     /// The `owner/name` slug for a GitHub remote URL (SSH, HTTPS, HTTP, git, or
     /// `ssh://` forms), or `nil` for a non-GitHub URL.
+    ///
+    /// SSH host aliases are common in fork workflows (`git@github-personal:o/r`
+    /// with the real host mapped in `~/.ssh/config`), so SSH forms accept any
+    /// github-ish host (see `isGitHubLikeHost`). A wrong guess is harmless:
+    /// slugs only form query paths against the hardcoded `api.github.com`,
+    /// where an unknown repo 404s.
     nonisolated static func githubRepositorySlug(fromRemoteURL remoteURL: String) -> String? {
         let trimmed = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let githubPrefixes = [
-            "git@github.com:",
-            "ssh://git@github.com/",
-            "https://github.com/",
-            "http://github.com/",
-            "git://github.com/",
-        ]
-        for prefix in githubPrefixes where trimmed.hasPrefix(prefix) {
-            let path = String(trimmed.dropFirst(prefix.count))
-            return normalizedGitHubRepositorySlug(path)
+        // scp-like SSH form: git@HOST:owner/repo(.git)
+        if trimmed.hasPrefix("git@"), let colon = trimmed.firstIndex(of: ":") {
+            let hostStart = trimmed.index(trimmed.startIndex, offsetBy: "git@".count)
+            guard hostStart < colon else { return nil }
+            let host = trimmed[hostStart..<colon].lowercased()
+            guard isGitHubLikeHost(host) else { return nil }
+            return normalizedGitHubRepositorySlug(String(trimmed[trimmed.index(after: colon)...]))
         }
 
         guard let url = URL(string: trimmed),
-              let host = url.host?.lowercased(),
-              host == "github.com" else {
+              let host = url.host?.lowercased() else {
             return nil
         }
-
+        switch url.scheme?.lowercased() {
+        case "ssh":
+            guard isGitHubLikeHost(host) else { return nil }
+        case "https", "http", "git":
+            guard host == "github.com" || host.hasSuffix(".github.com") else { return nil }
+        default:
+            return nil
+        }
         return normalizedGitHubRepositorySlug(url.path)
+    }
+
+    /// `github.com`, `*.github.com`, `github.com-*` aliases, or an undotted
+    /// alias starting with `github` (the `github-personal` / `github-work`
+    /// convention). Dotted hosts that merely start with "github" are rejected:
+    /// `github.mycorp.com` is the GitHub Enterprise hostname convention and
+    /// `github.com.attacker.net` is a lookalike — neither is github.com.
+    nonisolated static func isGitHubLikeHost(_ host: String) -> Bool {
+        if host == "github.com" || host.hasSuffix(".github.com") { return true }
+        if host.hasPrefix("github.com-") { return true }
+        return host.hasPrefix("github") && !host.contains(".")
     }
 
     /// The `owner/name` slug for a GitHub pull-request URL, or `nil` for a

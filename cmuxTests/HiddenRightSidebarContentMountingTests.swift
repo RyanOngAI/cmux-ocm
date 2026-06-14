@@ -65,10 +65,12 @@ struct HiddenRightSidebarContentMountingTests {
             fileExplorerStore: FileExplorerStore(),
             fileExplorerState: fileExplorerState,
             sessionIndexStore: SessionIndexStore(),
+            gitChangesStore: nil,
             titlebarHeight: 36,
             workspaceId: nil,
             onResumeSession: nil,
             onOpenFilePreview: { _ in },
+            onOpenChangedFile: { _ in },
             onOpenAsPane: { _ in },
             onClose: {}
         )

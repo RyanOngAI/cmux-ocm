@@ -28,6 +28,10 @@ public struct PullRequestProbeService: Sendable {
     /// in DEBUG builds; defaults to a no-op).
     let debugLog: @Sendable (String) -> Void
 
+    /// Runs the stage-2b GraphQL checks request. Injected (internal init) so
+    /// tests can record calls and stub responses without network access.
+    let graphQLRequestRunner: GraphQLRequestRunner
+
     /// Creates a pull-request probe service.
     ///
     /// - Parameters:
@@ -39,6 +43,19 @@ public struct PullRequestProbeService: Sendable {
     ) {
         self.commandRunner = commandRunner
         self.debugLog = debugLog
+        self.graphQLRequestRunner = Self.liveGraphQLRequestRunner
+    }
+
+    /// Test seam: like the public initializer but with an injectable GraphQL
+    /// request runner.
+    init(
+        commandRunner: any CommandRunning,
+        debugLog: @escaping @Sendable (String) -> Void,
+        graphQLRequestRunner: @escaping GraphQLRequestRunner
+    ) {
+        self.commandRunner = commandRunner
+        self.debugLog = debugLog
+        self.graphQLRequestRunner = graphQLRequestRunner
     }
 
     // MARK: Tuning constants
@@ -140,6 +157,7 @@ public struct PullRequestProbeService: Sendable {
             }
 
             var matchedPullRequest: GitHubPullRequestProbeItem?
+            var matchedCheckState: PullRequestCheckState?
             var matchedPullRequestUsedCache = false
             var sawTransientFailure = false
             var sawCachedSuccess = false
@@ -153,6 +171,13 @@ public struct PullRequestProbeService: Sendable {
                     }
                     if let candidateMatch = cacheEntry.pullRequestsByBranch[candidate.branch] {
                         matchedPullRequest = candidateMatch
+                        // Check states key on the *current* REST head SHA; a
+                        // lookup miss (SHA moved, no probe data, no token) is
+                        // surfaced as nil → unknown/neutral, never a stale
+                        // terminal color (the stale-green guard).
+                        matchedCheckState = candidateMatch.headSHA.flatMap {
+                            cacheEntry.checkStatesByHeadSHA[$0]
+                        }
                         matchedPullRequestUsedCache = usedCache
                         break
                     }
@@ -173,7 +198,8 @@ public struct PullRequestProbeService: Sendable {
                         number: matchedPullRequest.number,
                         urlString: matchedPullRequest.url,
                         statusRawValue: status.rawValue,
-                        branch: candidate.branch
+                        branch: candidate.branch,
+                        checkState: matchedCheckState
                     )
                 )
                 usedCachedRepoData = matchedPullRequestUsedCache

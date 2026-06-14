@@ -1167,6 +1167,7 @@
               "focusRightSidebar",
               "switchRightSidebarToFiles",
               "switchRightSidebarToFind",
+              "switchRightSidebarToChanges",
               "switchRightSidebarToSessions",
               "switchRightSidebarToFeed",
               "switchRightSidebarToDock",

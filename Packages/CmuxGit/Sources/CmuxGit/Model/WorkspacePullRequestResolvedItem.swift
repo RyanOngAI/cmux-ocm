@@ -12,12 +12,24 @@ public struct WorkspacePullRequestResolvedItem: Sendable {
     public let statusRawValue: String
     /// The branch the PR was matched for.
     public let branch: String
+    /// Aggregate CI check state for the PR's *current* REST head SHA, when the
+    /// stage-2b probe has one. `nil` means unknown/neutral — including the
+    /// stale-green guard case where the REST head SHA moved past every cached
+    /// check state's SHA (an old SHA's terminal color is never surfaced).
+    public let checkState: PullRequestCheckState?
 
     /// Creates a resolved item.
-    public init(number: Int, urlString: String, statusRawValue: String, branch: String) {
+    public init(
+        number: Int,
+        urlString: String,
+        statusRawValue: String,
+        branch: String,
+        checkState: PullRequestCheckState? = nil
+    ) {
         self.number = number
         self.urlString = urlString
         self.statusRawValue = statusRawValue
         self.branch = branch
+        self.checkState = checkState
     }
 }

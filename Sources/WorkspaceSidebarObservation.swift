@@ -86,6 +86,12 @@ extension Workspace {
             $logEntries,
             $progress
         )
+        // `$pullRequestCheckStatesByPanel` is intentionally NOT observed here:
+        // CI check-state flaps (pending → success, mergeStateStatus churn)
+        // must never invalidate left-sidebar rows, which render none of it
+        // (the #2586 typing-latency hazard family). The Changes panel header
+        // observes that property directly. Folding CI color into sidebar
+        // badges would be a future deliberate decision, not a default.
         let gitFields = Publishers.CombineLatest4(
             $gitBranch,
             $panelGitBranches,

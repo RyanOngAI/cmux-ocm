@@ -683,8 +683,13 @@ enum FeedJumpResolver {
     /// Dispatches a surface.send_text intent for the agent's terminal.
     /// The observer in AppDelegate translates it into the V2 socket
     /// call so the Feed stays decoupled from TerminalController.
+    /// `pressEnter: true` follows the text with a real Return keypress —
+    /// the default trailing-CR rides inside the bracketed paste, which TUI
+    /// composers (agent CLIs) treat as pasted newline text, not a submit.
     @MainActor
-    static func sendText(workspaceId: String, surfaceId: String, text: String) {
+    static func sendText(
+        workspaceId: String, surfaceId: String, text: String, pressEnter: Bool = false
+    ) {
         NotificationCenter.default.post(
             name: .feedRequestSendText,
             object: nil,
@@ -692,6 +697,7 @@ enum FeedJumpResolver {
                 "workspaceId": workspaceId,
                 "surfaceId": surfaceId,
                 "text": text,
+                "pressEnter": pressEnter,
             ]
         )
     }
