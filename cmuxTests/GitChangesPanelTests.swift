@@ -34,6 +34,25 @@ struct GitChangesPanelTests {
         #expect(RightSidebarMode.changes.canOpenAsPane)
     }
 
+    @Test func changesModeIsNotASelectableSidebarTab() {
+        #expect(!RightSidebarMode.changes.isSelectableSidebarTab)
+        // The mode bar (and the palette's mode-switch entries) omit Changes...
+        #expect(
+            !RightSidebarMode.modeBarTabs(feedEnabled: true, dockEnabled: true)
+                .contains(.changes)
+        )
+        // ...while the other modes remain selectable tabs.
+        for mode in [RightSidebarMode.files, .find, .sessions] {
+            #expect(mode.isSelectableSidebarTab)
+            #expect(RightSidebarMode.modeBarTabs(feedEnabled: false, dockEnabled: false).contains(mode))
+        }
+        // Changes stays available so open-as-pane keeps working.
+        #expect(
+            RightSidebarMode.availableModes(feedEnabled: false, dockEnabled: false)
+                .contains(.changes)
+        )
+    }
+
     @Test func fileExplorerStoreDoesNotSyncForChangesMode() {
         // The Changes panel attaches its store through TabManager's registry;
         // the file-explorer store must stay parked while Changes is showing.

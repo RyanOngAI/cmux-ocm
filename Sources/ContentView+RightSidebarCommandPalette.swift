@@ -98,7 +98,7 @@ extension ContentView {
             { _ in value }
         }
 
-        return RightSidebarMode.availableModes().map { mode in
+        return RightSidebarMode.modeBarTabs().map { mode in
             let title = mode.shortcutAction?.label ?? mode.label
             return CommandPaletteCommandContribution(
                 commandId: Self.commandPaletteRightSidebarModeCommandID(mode),

@@ -18,7 +18,7 @@ final class RightSidebarCommandPaletteTests: XCTestCase {
             let contributionsByID = Dictionary(uniqueKeysWithValues: contributions.map { ($0.commandId, $0) })
             let context = CommandPaletteContextSnapshot()
 
-            for mode in RightSidebarMode.availableModes() {
+            for mode in RightSidebarMode.modeBarTabs() {
                 let commandID = ContentView.commandPaletteRightSidebarModeCommandID(mode)
                 let contribution = try XCTUnwrap(
                     contributionsByID[commandID],
@@ -37,8 +37,11 @@ final class RightSidebarCommandPaletteTests: XCTestCase {
                 XCTAssertTrue(contribution.enablement(context))
             }
 
-            // Files, Find, Changes, Vault (Feed/Dock stay behind their beta flags).
-            XCTAssertEqual(contributions.count, 4)
+            // Files, Find, Vault (Feed/Dock stay behind their beta flags).
+            // Changes is not a mode-switch entry — it lives in the Files tab and
+            // as the "Open Changes as Pane" command instead.
+            XCTAssertEqual(contributions.count, 3)
+            XCTAssertNil(contributionsByID[ContentView.commandPaletteRightSidebarModeCommandID(.changes)])
             XCTAssertNil(contributionsByID[ContentView.commandPaletteRightSidebarModeCommandID(.feed)])
             XCTAssertNil(contributionsByID[ContentView.commandPaletteRightSidebarModeCommandID(.dock)])
         }
