@@ -1765,6 +1765,107 @@ class TabManager: ObservableObject {
         )
     }
 
+    /// Per-group guard so a rapid double "+" press on a repo-backed group can't
+    /// launch two concurrent worktree creations.
+    private var worktreeCreationInFlightGroupIds: Set<UUID> = []
+
+    /// Repo-backed group "+": create a git worktree of the group's repository
+    /// and open it as a member workspace, marked with its branch. Falls back to
+    /// a plain in-group workspace when the group's anchor isn't inside a git
+    /// repo, preserving the prior "+" behavior for non-repo groups.
+    @discardableResult
+    func createWorktreeWorkspaceInGroup(
+        groupId: UUID,
+        placement: WorkspaceGroupNewPlacement? = nil
+    ) async -> Workspace? {
+        guard !worktreeCreationInFlightGroupIds.contains(groupId) else { return nil }
+        guard let group = workspaceGroups.first(where: { $0.id == groupId }),
+              let anchorDirectory = tabs.first(where: { $0.id == group.anchorWorkspaceId })?.currentDirectory,
+              let repository = GitMetadataService.resolveGitRepository(containing: anchorDirectory) else {
+            // Not repo-backed: keep the existing plain-workspace behavior.
+            return createWorkspaceInGroup(groupId: groupId, placement: placement)
+        }
+
+        worktreeCreationInFlightGroupIds.insert(groupId)
+        defer { worktreeCreationInFlightGroupIds.remove(groupId) }
+        do {
+            let creation = try await WorktreeCreationService.createWorktree(repoRoot: repository.workTreeRoot)
+            let workspace = addWorkspace(
+                title: creation.branchName,
+                workingDirectory: creation.worktreePath,
+                inheritWorkingDirectory: false,
+                select: true,
+                eagerLoadTerminal: false
+            )
+            workspace.worktreeBranch = creation.branchName
+            addWorkspaceToGroup(workspaceId: workspace.id, groupId: groupId, placement: placement)
+            return workspace
+        } catch {
+            NSSound.beep()
+#if DEBUG
+            cmuxDebugLog("workspaceGroup.worktree.failed group=\(groupId.uuidString) repo=\(repository.workTreeRoot) error=\(error.localizedDescription)")
+#endif
+            return nil
+        }
+    }
+
+    /// Remove the git worktree backing `workspaceId` (and its branch), then
+    /// close the workspace. A dirty worktree prompts for confirmation before a
+    /// forced removal so uncommitted work is never discarded silently.
+    func removeWorktree(workspaceId: UUID) {
+        guard let workspace = tabs.first(where: { $0.id == workspaceId }),
+              let branch = workspace.worktreeBranch else { return }
+        let worktreePath = workspace.currentDirectory
+        Task { @MainActor in
+            let outcome = await WorktreeRemovalService.removeWorktree(
+                worktreePath: worktreePath, branch: branch, force: false
+            )
+            switch outcome {
+            case .removed:
+                closeWorktreeWorkspaceAfterRemoval(workspaceId)
+            case .dirty:
+                guard confirmForceRemoveWorktree(branch: branch) else { return }
+                let forced = await WorktreeRemovalService.removeWorktree(
+                    worktreePath: worktreePath, branch: branch, force: true
+                )
+                if case .removed = forced {
+                    closeWorktreeWorkspaceAfterRemoval(workspaceId)
+                } else {
+                    NSSound.beep()
+                }
+            case .failed:
+                NSSound.beep()
+            }
+        }
+    }
+
+    private func closeWorktreeWorkspaceAfterRemoval(_ workspaceId: UUID) {
+        guard let workspace = tabs.first(where: { $0.id == workspaceId }) else { return }
+        closeWorkspace(workspace)
+    }
+
+    private func confirmForceRemoveWorktree(branch: String) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(
+            localized: "worktree.remove.dirty.title",
+            defaultValue: "Remove worktree with uncommitted changes?"
+        )
+        alert.informativeText = String(
+            localized: "worktree.remove.dirty.message",
+            defaultValue: "The worktree “\(branch)” has uncommitted or untracked changes. Removing it deletes the worktree directory and its branch, discarding that work. This can’t be undone."
+        )
+        alert.addButton(withTitle: String(
+            localized: "worktree.remove.dirty.confirm",
+            defaultValue: "Remove Anyway"
+        ))
+        alert.addButton(withTitle: String(
+            localized: "worktree.remove.dirty.cancel",
+            defaultValue: "Cancel"
+        ))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     func addWorkspaceToGroup(
         workspaceId: UUID,
         groupId: UUID,
