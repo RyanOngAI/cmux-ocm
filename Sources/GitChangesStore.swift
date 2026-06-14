@@ -1023,39 +1023,22 @@ extension GitChangesStore {
         ) else { return nil }
         let branch = branchResult.exitStatus == 0 ? firstLine(branchResult.stdout) : nil
 
-        var baseRef: String?
-        guard let configuredBase = await runGit(
-            ["config", "--get", "cmux.changes.base"], in: repoRoot
-        ) else { return nil }
-        if configuredBase.exitStatus == 0, let configured = firstLine(configuredBase.stdout),
-           !configured.isEmpty {
-            guard let verified = await runGit(
-                ["rev-parse", "--verify", "--quiet", "\(configured)^{commit}"], in: repoRoot
-            ) else { return nil }
-            if verified.exitStatus == 0 {
-                baseRef = configured
-            }
-            // An unresolvable configured ref falls through to auto-detection
-            // rather than putting the panel in degraded mode.
+        // Default-branch base resolution is shared with worktree creation
+        // (`GitDefaultBranchResolver`) so a worktree branched off this ref shows
+        // an empty diff here. A process-level failure still aborts the refresh.
+        let baseResolution = await GitDefaultBranchResolver.resolveBaseRef { arguments in
+            guard let result = await runGit(arguments, in: repoRoot) else { return nil }
+            return GitDefaultBranchResolver.CommandResult(
+                exitStatus: result.exitStatus,
+                firstLine: firstLine(result.stdout) ?? ""
+            )
         }
-        if baseRef == nil {
-            guard let originHead = await runGit(
-                ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], in: repoRoot
-            ) else { return nil }
-            if originHead.exitStatus == 0, let line = firstLine(originHead.stdout) {
-                baseRef = line
-            } else {
-                for candidate in ["main", "master"] {
-                    guard let result = await runGit(
-                        ["rev-parse", "--verify", "--quiet", "refs/heads/\(candidate)^{commit}"],
-                        in: repoRoot
-                    ) else { return nil }
-                    if result.exitStatus == 0 {
-                        baseRef = candidate
-                        break
-                    }
-                }
-            }
+        let baseRef: String?
+        switch baseResolution {
+        case .processFailure:
+            return nil
+        case .resolved(let resolved):
+            baseRef = resolved
         }
 
         var mergeBase: String?

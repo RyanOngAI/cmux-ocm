@@ -1,3 +1,4 @@
+import CmuxGit
 import Foundation
 
 /// Result of creating a git worktree: the absolute worktree path and the
@@ -23,9 +24,11 @@ enum WorktreeCreationError: Error {
 }
 
 /// Production primitive that creates a git worktree off the repository's
-/// current `HEAD` and returns where it landed. This is the single git-worktree
+/// default branch and returns where it landed. This is the single git-worktree
 /// path shared by every cmux entrypoint (the repo-backed group "+" and the
-/// extension-sidebar prototype).
+/// extension-sidebar prototype). Branching off the default branch — rather than
+/// whatever is currently checked out — keeps a freshly created worktree a clean
+/// slate instead of inheriting the current branch's commits.
 ///
 /// It deliberately does **only** the git work — no sample files, no setup
 /// command, no workspace spawning. Callers layer their own behavior on the
@@ -46,7 +49,8 @@ enum WorktreeCreationService {
     ]
 
     /// Creates a new worktree under `<repoRoot>/.cmux/worktrees/<name>` on a new
-    /// branch `<name>` off `HEAD`, ensuring `.cmux/` stays locally git-ignored.
+    /// branch `<name>` off the repository's default branch, ensuring `.cmux/`
+    /// stays locally git-ignored.
     static func createWorktree(repoRoot: String) async throws -> WorktreeCreationResult {
         let root = URL(fileURLWithPath: repoRoot, isDirectory: true).standardizedFileURL
 
@@ -57,10 +61,31 @@ enum WorktreeCreationService {
             throw WorktreeCreationError.notAGitRepository
         }
 
-        // 2. HEAD must resolve to a commit — `worktree add … HEAD` fails on an
-        //    unborn branch, and we want a typed error, not a raw git failure.
-        let head = try await runGit(["rev-parse", "--verify", "--quiet", "HEAD"], in: root.path)
-        guard head.status == 0, !decode(head.output).isEmpty else {
+        // 2. Resolve the base ref: the repository's default branch, so a fresh
+        //    worktree is a clean checkout instead of inheriting the currently
+        //    checked out branch's commits. Shared with the Changes panel's diff
+        //    base (`GitDefaultBranchResolver`) so the new worktree shows no
+        //    changes. Falls back to `HEAD` only when no default branch resolves.
+        let resolution = await GitDefaultBranchResolver.resolveBaseRef { arguments in
+            guard let result = try? await runGit(arguments, in: root.path) else { return nil }
+            return GitDefaultBranchResolver.CommandResult(
+                exitStatus: result.status,
+                firstLine: trimmedFirstLine(result.output)
+            )
+        }
+        let baseRef: String
+        if case .resolved(let resolved?) = resolution {
+            baseRef = resolved
+        } else {
+            baseRef = "HEAD"
+        }
+
+        // The base must resolve to a commit — `worktree add … <ref>` fails on an
+        // unborn branch, and we want a typed error, not a raw git failure.
+        let baseCommit = try await runGit(
+            ["rev-parse", "--verify", "--quiet", "\(baseRef)^{commit}"], in: root.path
+        )
+        guard baseCommit.status == 0, !decode(baseCommit.output).isEmpty else {
             throw WorktreeCreationError.noCommitOnHead
         }
 
@@ -74,10 +99,10 @@ enum WorktreeCreationService {
             .appendingPathComponent("worktrees", isDirectory: true)
         let name = uniqueName(existingBranches: existingBranches, worktreesDir: worktreesDir)
 
-        // 5. Create the worktree off HEAD.
+        // 5. Create the worktree off the resolved base ref.
         try FileManager.default.createDirectory(at: worktreesDir, withIntermediateDirectories: true)
         let worktree = worktreesDir.appendingPathComponent(name, isDirectory: true)
-        let add = try await runGit(["worktree", "add", "-b", name, worktree.path, "HEAD"], in: root.path)
+        let add = try await runGit(["worktree", "add", "-b", name, worktree.path, baseRef], in: root.path)
         guard add.status == 0 else {
             throw WorktreeCreationError.worktreeAddFailed(status: add.status, details: decode(add.output))
         }
@@ -144,6 +169,15 @@ enum WorktreeCreationService {
 
     private static func decode(_ data: Data) -> String {
         String(data: data, encoding: .utf8) ?? ""
+    }
+
+    /// Trimmed first line of git output, or `""` when there is none.
+    private static func trimmedFirstLine(_ data: Data) -> String {
+        decode(data)
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespaces) ?? ""
     }
 
     /// Runs `git -C <directory> <arguments…>` and returns its exit status plus

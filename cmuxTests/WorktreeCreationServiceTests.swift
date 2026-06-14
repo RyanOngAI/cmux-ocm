@@ -62,8 +62,8 @@ struct WorktreeCreationServiceTests {
 
     // MARK: - Happy path
 
-    @Test("creates a worktree under .cmux/worktrees off HEAD")
-    func createsWorktreeOffHead() async throws {
+    @Test("creates a worktree under .cmux/worktrees off the default branch")
+    func createsWorktreeUnderContainer() async throws {
         let repo = try makeRepoWithCommit()
 
         let result = try await WorktreeCreationService.createWorktree(repoRoot: repo)
@@ -76,12 +76,12 @@ struct WorktreeCreationServiceTests {
         let list = try git(["worktree", "list", "--porcelain"], in: repo)
         #expect(list.contains(result.worktreePath))
 
-        // The branch exists and points at the same commit as HEAD.
+        // The branch exists and points at the default branch (here `main`).
         let branchSha = try git(["rev-parse", result.branchName], in: repo)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let headSha = try git(["rev-parse", "HEAD"], in: repo)
+        let mainSha = try git(["rev-parse", "main"], in: repo)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        #expect(branchSha == headSha)
+        #expect(branchSha == mainSha)
     }
 
     @Test("branches off the default branch, not the current feature branch")
