@@ -711,6 +711,126 @@ final class CMUXOpenCommandTests: XCTestCase {
         XCTAssertTrue(result.stdout.contains("[--focus <true|false>] [--no-focus] [--title <text>]"), result.stdout)
         XCTAssertTrue(result.stdout.contains("[--cwd <path>] [--base <ref>]"), result.stdout)
         XCTAssertTrue(result.stdout.contains("--base <ref>"), result.stdout)
+        XCTAssertTrue(result.stdout.contains("--file"), result.stdout)
+        XCTAssertTrue(result.stdout.contains("--reuse-surface"), result.stdout)
+    }
+
+    func testDiffCommandFileFlagThreadsInitialFileIntoBranchViewerConfig() throws {
+        let cliPath = try bundledCLIPath()
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let repoURL = rootURL.appendingPathComponent("repo", isDirectory: true)
+        let fileURL = repoURL.appendingPathComponent("story.txt")
+        try FileManager.default.createDirectory(at: repoURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        try runGit(["init"], in: repoURL)
+        try runGit(["checkout", "-b", "main"], in: repoURL)
+        try runGit(["config", "user.name", "cmux tests"], in: repoURL)
+        try runGit(["config", "user.email", "cmux@example.invalid"], in: repoURL)
+        try runGit(["remote", "add", "origin", rootURL.appendingPathComponent("origin.git").path], in: repoURL)
+        try "one\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        try runGit(["add", "story.txt"], in: repoURL)
+        try runGit(["commit", "-m", "initial"], in: repoURL)
+        let initialCommit = try runGitStdout(["rev-parse", "HEAD"], in: repoURL)
+        try runGit(["update-ref", "refs/remotes/origin/main", initialCommit], in: repoURL)
+        try runGit(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], in: repoURL)
+        try runGit(["checkout", "-b", "feature/jump"], in: repoURL)
+        try "one\ntwo\n".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let reuseSurfaceId = UUID().uuidString
+        let branch = try runDiffCLIAndReadHTML(
+            cliPath: cliPath,
+            arguments: ["diff", "--branch", "--file", "story.txt", "--reuse-surface", reuseSurfaceId],
+            currentDirectoryURL: repoURL
+        )
+        XCTAssertTrue(branch.patch.contains("+two"), branch.patch)
+        let payload = try diffViewerPayload(from: branch.html)
+        XCTAssertEqual(payload["initialFile"] as? String, "story.txt")
+        XCTAssertEqual(branch.params["reuse_surface_id"] as? String, reuseSurfaceId)
+
+        // Switching sources must not re-trigger the initial scroll: sibling
+        // source pages carry no initialFile.
+        let sourceOptions = try XCTUnwrap(payload["sourceOptions"] as? [[String: Any]])
+        let unstagedURLString = try diffViewerOptionURL(value: "unstaged", in: sourceOptions)
+        let unstagedFileURL = try diffViewerHTMLFileURL(for: unstagedURLString, from: branch.params)
+        defer { try? FileManager.default.removeItem(at: unstagedFileURL) }
+        let unstagedPayload = try diffViewerPayload(
+            from: try String(contentsOf: unstagedFileURL, encoding: .utf8)
+        )
+        XCTAssertNil(unstagedPayload["initialFile"])
+    }
+
+    func testDiffCommandFileFlagAcceptsFlagShapedValueLiterally() throws {
+        let cliPath = try bundledCLIPath()
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let patchURL = rootURL.appendingPathComponent("changes.patch")
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try """
+        diff --git a/-weird-name.txt b/-weird-name.txt
+        index 8ab686e..d95f3ad 100644
+        --- a/-weird-name.txt
+        +++ b/-weird-name.txt
+        @@ -1,1 +1,2 @@
+         one
+        +two
+        """.write(to: patchURL, atomically: true, encoding: .utf8)
+
+        // The token after --file is consumed as a literal value even though it
+        // is flag-shaped; it must round-trip into the viewer config unchanged.
+        let result = try runDiffCLIAndReadHTML(
+            cliPath: cliPath,
+            arguments: ["diff", patchURL.path, "--file", "-weird-name.txt"]
+        )
+        let payload = try diffViewerPayload(from: result.html)
+        XCTAssertEqual(payload["initialFile"] as? String, "-weird-name.txt")
+    }
+
+    func testDiffCommandFileFlagWithoutValueErrorsCleanly() throws {
+        let cliPath = try bundledCLIPath()
+        let result = runCLI(
+            cliPath: cliPath,
+            socketPath: makeSocketPath("diff-file-novalue"),
+            arguments: ["diff", "--file"]
+        )
+        XCTAssertFalse(result.timedOut, result.stderr)
+        XCTAssertNotEqual(result.status, 0, result.stdout)
+        XCTAssertTrue(result.stderr.contains("--file requires a value"), result.stderr)
+    }
+
+    func testDiffCommandForwardsReuseSurfaceIntoOpenSplitParams() throws {
+        let cliPath = try bundledCLIPath()
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let patchURL = rootURL.appendingPathComponent("changes.patch")
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try """
+        diff --git a/hello.txt b/hello.txt
+        index 8ab686e..d95f3ad 100644
+        --- a/hello.txt
+        +++ b/hello.txt
+        @@ -1,1 +1,2 @@
+         one
+        +two
+        """.write(to: patchURL, atomically: true, encoding: .utf8)
+
+        let reuseSurfaceId = UUID().uuidString
+        let result = try runDiffCLIAndReadHTML(
+            cliPath: cliPath,
+            arguments: ["diff", patchURL.path, "--reuse-surface", reuseSurfaceId]
+        )
+        XCTAssertEqual(result.params["reuse_surface_id"] as? String, reuseSurfaceId)
+
+        // Without the flag the param must stay absent so open_split keeps its
+        // create-a-new-split behavior.
+        let withoutReuse = try runDiffCLIAndReadHTML(
+            cliPath: cliPath,
+            arguments: ["diff", patchURL.path]
+        )
+        XCTAssertNil(withoutReuse.params["reuse_surface_id"])
     }
 
     func testDiffCommandFallsBackToNonEmptyGitSourceForSelector() throws {

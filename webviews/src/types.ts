@@ -3,6 +3,8 @@ import type { DiffViewerAppearance } from "./appearance";
 export type DiffViewerPayload = {
   appearance?: DiffViewerAppearance;
   externalURL?: string;
+  /** Repo-root-relative file scrolled into view once on first render. */
+  initialFile?: string;
   labels?: Record<string, string>;
   layout?: "split" | "unified";
   layoutSource?: "default" | "explicit";

@@ -1087,6 +1087,11 @@ class TabManager: ObservableObject {
     private nonisolated static let workspacePullRequestRepoCachePruneLifetime: TimeInterval = 60
     private nonisolated static let workspacePullRequestPollJitterFraction = 0.10
     private nonisolated static let workspacePullRequestRefreshBatchLimit = 3
+    /// When the GraphQL checks probe reports fewer remaining rate-limit points
+    /// than this, PR polling backs off to ``checksLowRateLimitPollInterval``.
+    private nonisolated static let checksLowRateLimitThreshold = 200
+    /// Poll floor while the GraphQL rate-limit budget is low.
+    private nonisolated static let checksLowRateLimitPollInterval: TimeInterval = 300
     private nonisolated static let mobileHostBackgroundWorkDeferralInterval: TimeInterval = 2.0
     private nonisolated static let mobileHostBackgroundWorkQuietInterval: TimeInterval = 60.0
     @Published var selectedTabId: UUID? {
@@ -1231,6 +1236,11 @@ class TabManager: ObservableObject {
     private var workspacePullRequestPollTask: Task<Void, Never>?
     private var workspacePullRequestRefreshTask: Task<Void, Never>?
     private var workspacePullRequestFollowUpShouldBypassRepoCache = false
+    // Per-workspace Changes-panel stores, keyed like the rest of the
+    // per-workspace git machinery. Ref-counted by visible observers
+    // (sidebar tab + pop-out panes across windows); fully suspended at zero.
+    private var gitChangesStoresByWorkspaceId: [UUID: GitChangesStore] = [:]
+    private var gitChangesObserverCountsByWorkspaceId: [UUID: Int] = [:]
 
     @Published private(set) var focusHistoryRevision: UInt64 = 0 {
         didSet {
@@ -1697,6 +1707,60 @@ class TabManager: ObservableObject {
         workspaceGitMetadataWatcherDescriptorRequestsByKey.removeAll()
     }
 
+    // MARK: - Git changes store registry (Changes panel data layer)
+
+    /// Attaches one visible observer (sidebar Changes tab or pop-out pane) to
+    /// the workspace's ``GitChangesStore``, lazily creating the store on the
+    /// first attach and resuming it (watchers + an immediate refresh) when the
+    /// observer count goes 0 → 1.
+    @discardableResult
+    func attachGitChangesObserver(
+        workspaceId: UUID,
+        root: GitChangesWorkspaceRoot
+    ) -> GitChangesStore {
+        let store: GitChangesStore
+        if let existing = gitChangesStoresByWorkspaceId[workspaceId] {
+            store = existing
+        } else {
+            store = GitChangesStore(gitMetadataService: gitMetadataService)
+            gitChangesStoresByWorkspaceId[workspaceId] = store
+        }
+        let count = (gitChangesObserverCountsByWorkspaceId[workspaceId] ?? 0) + 1
+        gitChangesObserverCountsByWorkspaceId[workspaceId] = count
+        store.setWorkspaceRoot(root)
+        if count == 1 {
+            store.resume()
+        }
+        return store
+    }
+
+    /// Detaches one visible observer. At zero observers the store is fully
+    /// suspended (watchers torn down, refreshes cancelled) but kept warm so a
+    /// re-attach renders the last snapshot instantly while it refreshes.
+    func detachGitChangesObserver(workspaceId: UUID) {
+        guard let count = gitChangesObserverCountsByWorkspaceId[workspaceId] else { return }
+        if count <= 1 {
+            gitChangesObserverCountsByWorkspaceId.removeValue(forKey: workspaceId)
+            gitChangesStoresByWorkspaceId[workspaceId]?.suspend()
+        } else {
+            gitChangesObserverCountsByWorkspaceId[workspaceId] = count - 1
+        }
+    }
+
+    /// Tears down the workspace's changes store entirely (workspace close or
+    /// detach from this window). Suspends first so watchers and in-flight git
+    /// work stop deterministically before the reference drops.
+    ///
+    /// Removing the counts entry resets the observer count: a late
+    /// `detachGitChangesObserver` from a stale manager (e.g. after a
+    /// cross-window workspace move) finds no entry and is a harmless no-op.
+    private func teardownGitChangesStore(workspaceId: UUID) {
+        gitChangesObserverCountsByWorkspaceId.removeValue(forKey: workspaceId)
+        if let store = gitChangesStoresByWorkspaceId.removeValue(forKey: workspaceId) {
+            store.suspend()
+        }
+    }
+
     private func refreshTrackedWorkspacePullRequestsIfNeeded(
         reason: String,
         allowCachedResultsOverride: Bool? = nil
@@ -1907,6 +1971,19 @@ class TabManager: ObservableObject {
             workspacePullRequestRepoCacheBySlug[repoSlug] = cacheEntry
         }
 
+        // GraphQL budget guard: when the checks probe reports a low
+        // `rateLimit.remaining`, stretch every next-poll interval. Note the
+        // probe transport surfaces status code + body only, so a 403/429
+        // `Retry-After` header cannot be honored here (documented gap) —
+        // `rateLimit.remaining` is the backoff signal.
+        let checksRateLimitLow = repoResults.values.contains { repoResult in
+            guard case .success(let cacheEntry, _, _) = repoResult,
+                  let remaining = cacheEntry.checksRateLimitRemaining else {
+                return false
+            }
+            return remaining < Self.checksLowRateLimitThreshold
+        }
+
         let requestedKeySet = Set(requestedKeys)
         let resultsByKey = Dictionary(
             uniqueKeysWithValues: results.map {
@@ -1970,6 +2047,14 @@ class TabManager: ObservableObject {
                     branch: resolvedPullRequest.branch,
                     isStale: false
                 )
+                // Stage 2b check state (Changes panel header). A nil state —
+                // including the stale-green guard, where the REST head SHA
+                // moved past every cached check state — clears the published
+                // entry so the header renders neutral, never an old color.
+                workspace.updatePanelPullRequestCheckState(
+                    panelId: result.panelId,
+                    checkState: resolvedPullRequest.checkState
+                )
             case .notFound:
                 workspacePullRequestTransientFailureCountByKey[key] = 0
                 workspacePullRequestLastTerminalStateRefreshAtByKey.removeValue(forKey: key)
@@ -2005,7 +2090,8 @@ class TabManager: ObservableObject {
                 panelId: result.panelId,
                 now: now,
                 resolution: result.resolution,
-                countsAsTerminalSweep: countsAsTerminalSweep
+                countsAsTerminalSweep: countsAsTerminalSweep,
+                checksRateLimitLow: checksRateLimitLow
             )
             if rerunPending {
                 workspacePullRequestNextPollAtByKey[key] = .distantPast
@@ -2040,7 +2126,8 @@ class TabManager: ObservableObject {
         panelId: UUID,
         now: Date,
         resolution: WorkspacePullRequestRefreshResult.Resolution,
-        countsAsTerminalSweep: Bool
+        countsAsTerminalSweep: Bool,
+        checksRateLimitLow: Bool
     ) {
         if countsAsTerminalSweep {
             workspacePullRequestLastTerminalStateRefreshAtByKey[key] = now
@@ -2067,9 +2154,25 @@ class TabManager: ObservableObject {
         }
 
         workspacePullRequestLastTerminalStateRefreshAtByKey.removeValue(forKey: key)
-        let baseInterval = isSelectedFocusedPanel(workspace: workspace, panelId: panelId)
+        var baseInterval = isSelectedFocusedPanel(workspace: workspace, panelId: panelId)
             ? Self.selectedPollInterval
             : Self.backgroundPollInterval
+        // CI cadence (R13): while the tracked PR's check rollup is running
+        // (non-terminal) the fast selected cadence stands — the 15s repo
+        // cache is the effective floor. Once the rollup is terminal
+        // (success/failure/error) CI color is stable, so stretch toward the
+        // background interval. Head-SHA changes need no extra hook here: the
+        // workspace git metadata watcher already fires on `.git` ref updates
+        // and schedules an immediate cache-bypassing refresh
+        // ("localGitProbe"/"branchChange"), which re-fetches REST head SHAs
+        // and, via stage 2b, the new SHA's check state.
+        if case .resolved(let resolvedPullRequest) = resolution,
+           resolvedPullRequest.checkState?.rollupState.isTerminal == true {
+            baseInterval = max(baseInterval, Self.backgroundPollInterval)
+        }
+        if checksRateLimitLow {
+            baseInterval = max(baseInterval, Self.checksLowRateLimitPollInterval)
+        }
         workspacePullRequestNextPollAtByKey[key] = now.addingTimeInterval(Self.jitteredPollInterval(base: baseInterval))
     }
 
@@ -5313,6 +5416,7 @@ class TabManager: ObservableObject {
         }
         clearWorkspaceGitProbes(workspaceId: workspace.id)
         clearWorkspacePullRequestTracking(workspaceId: workspace.id)
+        teardownGitChangesStore(workspaceId: workspace.id)
         sidebarSelectedWorkspaceIds.remove(workspace.id)
         invalidateFocusHistoryTarget(workspaceId: workspace.id, panelId: nil)
 
@@ -5373,6 +5477,12 @@ class TabManager: ObservableObject {
     func detachWorkspace(tabId: UUID) -> Workspace? {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return nil }
         clearWorkspaceGitProbes(workspaceId: tabId)
+        // Workspace move between windows (AppDelegate.moveWorkspaceToWindow /
+        // moveWorkspaceToNewWindow detach + attach): teardown, not transfer.
+        // The registry is per-TabManager, so the destination window's panels
+        // re-attach through the destination manager and lazily recreate a
+        // fresh store, which re-resolves everything in one refresh.
+        teardownGitChangesStore(workspaceId: tabId)
         sidebarSelectedWorkspaceIds.remove(tabId)
         invalidateFocusHistoryTarget(workspaceId: tabId, panelId: nil)
 

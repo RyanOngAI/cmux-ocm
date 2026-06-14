@@ -96,11 +96,20 @@ extension PullRequestProbeService {
                 return .success(cachedEntry, usedCache: true, transientBranches: [])
             }
 
+            let refreshedAt = Date()
             let lookupOutcome = await branchLookupOutcome(
                 repoSlug: repoSlug,
                 candidateBranches: unresolvedBranches,
                 baseEntry: cachedEntry,
-                refreshedAt: Date(),
+                refreshedAt: refreshedAt,
+                session: session,
+                authHeader: authHeader
+            )
+            let entryWithChecks = await checksAugmentedEntry(
+                repoSlug: repoSlug,
+                candidateBranches: normalizedCandidateBranches,
+                entry: lookupOutcome.cacheEntry,
+                now: refreshedAt,
                 session: session,
                 authHeader: authHeader
             )
@@ -109,7 +118,7 @@ extension PullRequestProbeService {
                 "branchLookups=\(unresolvedBranches.count) transient=\(lookupOutcome.transientBranches.count)"
             )
             return .success(
-                lookupOutcome.cacheEntry,
+                entryWithChecks,
                 usedCache: false,
                 transientBranches: lookupOutcome.transientBranches
             )
@@ -147,7 +156,12 @@ extension PullRequestProbeService {
 
         let recentWindowEntry = WorkspacePullRequestRepoCacheEntry(
             fetchedAt: fetchTimestamp,
-            pullRequestsByBranch: Self.pullRequestMapByNormalizedBranch(from: allPullRequests)
+            pullRequestsByBranch: Self.pullRequestMapByNormalizedBranch(from: allPullRequests),
+            // Carry the prior entry's check states forward: terminal rollups
+            // are long-lived per head SHA, so a fresh REST window must not
+            // discard them (stage 2b prunes and refreshes as needed).
+            checkStatesByHeadSHA: cachedEntry?.checkStatesByHeadSHA ?? [:],
+            checksRateLimitRemaining: cachedEntry?.checksRateLimitRemaining
         )
         let unresolvedBranches = Self.unresolvedBranches(
             normalizedCandidateBranches,
@@ -169,13 +183,22 @@ extension PullRequestProbeService {
                 authHeader: authHeader
             )
         }
+        // Stage 2b: augment the entry with check states for the tracked PRs.
+        let entryWithChecks = await checksAugmentedEntry(
+            repoSlug: repoSlug,
+            candidateBranches: normalizedCandidateBranches,
+            entry: lookupOutcome.cacheEntry,
+            now: fetchTimestamp,
+            session: session,
+            authHeader: authHeader
+        )
         debugLog(
             "workspace.prRefresh.repo.success repo=\(repoSlug) pages=\(fetchedPageCount) " +
             "branches=\(lookupOutcome.cacheEntry.pullRequestsByBranch.count) " +
             "branchLookups=\(unresolvedBranches.count) transient=\(lookupOutcome.transientBranches.count)"
         )
         return .success(
-            lookupOutcome.cacheEntry,
+            entryWithChecks,
             usedCache: false,
             transientBranches: lookupOutcome.transientBranches
         )
@@ -254,7 +277,9 @@ extension PullRequestProbeService {
             cacheEntry: WorkspacePullRequestRepoCacheEntry(
                 fetchedAt: refreshedAt,
                 pullRequestsByBranch: pullRequestsByBranch,
-                knownAbsentBranches: knownAbsentBranches
+                knownAbsentBranches: knownAbsentBranches,
+                checkStatesByHeadSHA: baseEntry.checkStatesByHeadSHA,
+                checksRateLimitRemaining: baseEntry.checksRateLimitRemaining
             ),
             transientBranches: transientBranches
         )
@@ -341,7 +366,8 @@ extension PullRequestProbeService {
             updatedAt: pullRequest.updatedAt,
             mergedAt: pullRequest.mergedAt,
             headRefName: pullRequest.head.ref,
-            baseRefName: pullRequest.base?.ref
+            baseRefName: pullRequest.base?.ref,
+            headSHA: pullRequest.head.sha
         )
     }
 

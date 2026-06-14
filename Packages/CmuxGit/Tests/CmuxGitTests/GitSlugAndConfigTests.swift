@@ -20,6 +20,29 @@ import Testing
         #expect(GitMetadataService.githubRepositorySlug(fromRemoteURL: "") == nil)
     }
 
+    @Test(arguments: [
+        "git@github-personal:RyanOngAI/cmux-ocm.git",
+        "git@github-work:RyanOngAI/cmux-ocm.git",
+        "ssh://git@github-personal/RyanOngAI/cmux-ocm.git",
+        "git@ssh.github.com:RyanOngAI/cmux-ocm.git",
+    ])
+    func parsesGitHubSSHHostAliases(url: String) {
+        #expect(GitMetadataService.githubRepositorySlug(fromRemoteURL: url) == "RyanOngAI/cmux-ocm")
+    }
+
+    @Test func sshAliasMustLookLikeGitHub() {
+        #expect(GitMetadataService.githubRepositorySlug(fromRemoteURL: "git@mygit-personal:foo/bar.git") == nil)
+        #expect(GitMetadataService.githubRepositorySlug(fromRemoteURL: "git@:foo/bar.git") == nil)
+        // https hosts stay strict: aliases only make sense for SSH.
+        #expect(GitMetadataService.githubRepositorySlug(fromRemoteURL: "https://github-personal/foo/bar") == nil)
+        // Dotted FQDNs starting with "github" are NOT github.com: GitHub
+        // Enterprise hosts and lookalike domains must stay rejected.
+        #expect(GitMetadataService.githubRepositorySlug(fromRemoteURL: "git@github.mycorp.com:foo/bar.git") == nil)
+        #expect(GitMetadataService.githubRepositorySlug(fromRemoteURL: "git@github.com.attacker.net:foo/bar.git") == nil)
+        // github.com-username aliases (ssh-config convention) stay accepted.
+        #expect(GitMetadataService.githubRepositorySlug(fromRemoteURL: "git@github.com-personal:foo/bar.git") == "foo/bar")
+    }
+
     @Test func ordersRemotesUpstreamThenOriginThenRest() {
         let output = """
         origin\thttps://github.com/me/fork.git (fetch)

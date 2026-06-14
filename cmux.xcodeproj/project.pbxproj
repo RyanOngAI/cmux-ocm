@@ -372,6 +372,11 @@
 		D0B1000AA1B2C3D4E5F60001 /* GhosttyTerminalViewSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B1000BA1B2C3D4E5F60001 /* GhosttyTerminalViewSupport.swift */; };
 		D7AB34400000000000000003 /* GhosttyTerminalViewVisibilityPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7AB34400000000000000004 /* GhosttyTerminalViewVisibilityPolicyTests.swift */; };
 		D3284101A1B2C3D4E5F60718 /* GhosttyTextInputSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3284102A1B2C3D4E5F60718 /* GhosttyTextInputSupport.swift */; };
+		AC11FE5701B2C3D4E5F60009 /* GitChangesCreatePRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC11FE5701B2C3D4E5F6000A /* GitChangesCreatePRTests.swift */; };
+		AC11FE5701B2C3D4E5F60007 /* GitChangesPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC11FE5701B2C3D4E5F60008 /* GitChangesPanelTests.swift */; };
+		AC11FE5701B2C3D4E5F60005 /* GitChangesPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC11FE5701B2C3D4E5F60006 /* GitChangesPanelView.swift */; };
+		AC11FE5701B2C3D4E5F60001 /* GitChangesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC11FE5701B2C3D4E5F60002 /* GitChangesStore.swift */; };
+		AC11FE5701B2C3D4E5F60003 /* GitChangesStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC11FE5701B2C3D4E5F60004 /* GitChangesStoreTests.swift */; };
 		617C70C1617C70C1617C70C1 /* GitPollClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 617C70C2617C70C2617C70C2 /* GitPollClock.swift */; };
 		3865A0023865A0023865A002 /* GlobalSearchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3865B0023865B0023865B002 /* GlobalSearchCoordinator.swift */; };
 		3865A0073865A0073865A007 /* GlobalSearchDocuments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3865B0073865B0073865B007 /* GlobalSearchDocuments.swift */; };
@@ -1134,6 +1139,11 @@
 		D0B1000BA1B2C3D4E5F60001 /* GhosttyTerminalViewSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyTerminalViewSupport.swift; sourceTree = "<group>"; };
 		D7AB34400000000000000004 /* GhosttyTerminalViewVisibilityPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyTerminalViewVisibilityPolicyTests.swift; sourceTree = "<group>"; };
 		D3284102A1B2C3D4E5F60718 /* GhosttyTextInputSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyTextInputSupport.swift; sourceTree = "<group>"; };
+		AC11FE5701B2C3D4E5F6000A /* GitChangesCreatePRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitChangesCreatePRTests.swift; sourceTree = "<group>"; };
+		AC11FE5701B2C3D4E5F60008 /* GitChangesPanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitChangesPanelTests.swift; sourceTree = "<group>"; };
+		AC11FE5701B2C3D4E5F60006 /* GitChangesPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitChangesPanelView.swift; sourceTree = "<group>"; };
+		AC11FE5701B2C3D4E5F60002 /* GitChangesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitChangesStore.swift; sourceTree = "<group>"; };
+		AC11FE5701B2C3D4E5F60004 /* GitChangesStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitChangesStoreTests.swift; sourceTree = "<group>"; };
 		617C70C2617C70C2617C70C2 /* GitPollClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitPollClock.swift; sourceTree = "<group>"; };
 		3865B0023865B0023865B002 /* GlobalSearchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Search/GlobalSearchCoordinator.swift; sourceTree = "<group>"; };
 		3865B0073865B0073865B007 /* GlobalSearchDocuments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Search/GlobalSearchDocuments.swift; sourceTree = "<group>"; };
@@ -2066,6 +2076,8 @@
 				A5001653 /* CmuxConfigExecutor.swift */,
 				A5001655 /* CmuxActionTrust.swift */,
 				FE001001 /* FileExplorerStore.swift */,
+				AC11FE5701B2C3D4E5F60002 /* GitChangesStore.swift */,
+				AC11FE5701B2C3D4E5F60006 /* GitChangesPanelView.swift */,
 				B37A0000000000000000000A /* FileExplorerState.swift */,
 				FE001003 /* FileExplorerSearchController.swift */,
 				FE001004 /* FileExplorerTerminalPathInsertion.swift */,
@@ -2274,6 +2286,9 @@
 				B09C007F42697761B5F1A2AB /* OmnibarAndToolsTests.swift */,
 				D2C075029771815DD5DA1332 /* NotificationAndMenuBarTests.swift */,
 				4E5F60720000000000000002 /* NotificationSoundSettingsTests.swift */,
+				AC11FE5701B2C3D4E5F60004 /* GitChangesStoreTests.swift */,
+				AC11FE5701B2C3D4E5F60008 /* GitChangesPanelTests.swift */,
+				AC11FE5701B2C3D4E5F6000A /* GitChangesCreatePRTests.swift */,
 				42092CDB2109E250F7F2A76E /* TabManagerUnitTests.swift */,
 				D1FFC0DE000000000000C001 /* DiffCommentStoreTests.swift */,
 				C9A57002C9A57002C9A57002 /* WorkspaceGroupTests.swift */,
@@ -2924,6 +2939,8 @@
 				A5001005 /* GhosttyTerminalView.swift in Sources */,
 				D0B1000AA1B2C3D4E5F60001 /* GhosttyTerminalViewSupport.swift in Sources */,
 				D3284101A1B2C3D4E5F60718 /* GhosttyTextInputSupport.swift in Sources */,
+				AC11FE5701B2C3D4E5F60005 /* GitChangesPanelView.swift in Sources */,
+				AC11FE5701B2C3D4E5F60001 /* GitChangesStore.swift in Sources */,
 					617C70C1617C70C1617C70C1 /* GitPollClock.swift in Sources */,
 				3865A0023865A0023865A002 /* GlobalSearchCoordinator.swift in Sources */,
 				3865A0073865A0073865A007 /* GlobalSearchDocuments.swift in Sources */,
@@ -3331,6 +3348,9 @@
 				3069F1D10000000000000003 /* GhosttyPasteboardFidelityTests.swift in Sources */,
 				C13519000000000000000003 /* GhosttyTerminalStartupEnvironmentTests.swift in Sources */,
 				D7AB34400000000000000003 /* GhosttyTerminalViewVisibilityPolicyTests.swift in Sources */,
+				AC11FE5701B2C3D4E5F60009 /* GitChangesCreatePRTests.swift in Sources */,
+				AC11FE5701B2C3D4E5F60007 /* GitChangesPanelTests.swift in Sources */,
+				AC11FE5701B2C3D4E5F60003 /* GitChangesStoreTests.swift in Sources */,
 				3865A0053865A0053865A005 /* GlobalSearchShortcutSettingsTests.swift in Sources */,
 				F1C1AA21B7E84D10A1C10001 /* InactivePaneFirstClickFocusTests.swift in Sources */,
 				C34670020000000000000001 /* KeyboardShortcutContextTests.swift in Sources */,

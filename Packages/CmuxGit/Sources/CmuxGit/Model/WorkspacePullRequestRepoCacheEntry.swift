@@ -12,15 +12,26 @@ public struct WorkspacePullRequestRepoCacheEntry: Sendable {
     /// Branches positively known to have no pull request (so a cached entry
     /// doesn't re-trigger per-branch lookups for them).
     public let knownAbsentBranches: Set<String>
+    /// Aggregate CI check state per PR head SHA (stage 2b GraphQL probe).
+    /// Terminal rollups are long-lived for their SHA; non-terminal entries
+    /// are only fresh within ``PullRequestProbeService/repoCacheLifetime``.
+    public let checkStatesByHeadSHA: [String: PullRequestCheckState]
+    /// `rateLimit.remaining` reported by the last GraphQL checks fetch, so the
+    /// caller can back off polling when the budget runs low.
+    public let checksRateLimitRemaining: Int?
 
     /// Creates a cache entry.
     public init(
         fetchedAt: Date,
         pullRequestsByBranch: [String: GitHubPullRequestProbeItem],
-        knownAbsentBranches: Set<String> = []
+        knownAbsentBranches: Set<String> = [],
+        checkStatesByHeadSHA: [String: PullRequestCheckState] = [:],
+        checksRateLimitRemaining: Int? = nil
     ) {
         self.fetchedAt = fetchedAt
         self.pullRequestsByBranch = pullRequestsByBranch
         self.knownAbsentBranches = knownAbsentBranches
+        self.checkStatesByHeadSHA = checkStatesByHeadSHA
+        self.checksRateLimitRemaining = checksRateLimitRemaining
     }
 }
