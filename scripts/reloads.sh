@@ -159,6 +159,21 @@ if [[ -z "$TAG" ]]; then
     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID"
   )
 fi
+
+# The Release config signs with Resources/cmux.entitlements, whose
+# keychain-access-groups entitlement requires a real Apple Development
+# certificate. On a machine without any signing identity, that build fails
+# before reaching the ad-hoc `codesign --force --sign -` re-sign below. When no
+# identity is installed, disable Xcode signing and let the ad-hoc re-sign make
+# the staging app runnable side-by-side. Machines with a real identity (and CI)
+# keep their normal signing path untouched.
+SIGNING_IDENTITY_COUNT="$(security find-identity -v -p codesigning 2>/dev/null \
+  | sed -n 's/^ *\([0-9][0-9]*\) valid identities found.*/\1/p' | tail -n1)"
+if [[ -z "$SIGNING_IDENTITY_COUNT" || "$SIGNING_IDENTITY_COUNT" -eq 0 ]]; then
+  echo "reloads.sh: no code-signing identity found; building staging with ad-hoc signing (keychain sharing disabled)." >&2
+  XCODEBUILD_ARGS+=(CODE_SIGNING_ALLOWED=NO)
+fi
+
 XCODEBUILD_ARGS+=(build)
 
 xcodebuild "${XCODEBUILD_ARGS[@]}"
