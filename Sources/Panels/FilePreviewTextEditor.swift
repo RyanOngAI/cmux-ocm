@@ -3,6 +3,11 @@ import CmuxCodeHighlighting
 import Neon
 import SwiftUI
 
+/// Skip syntax-error scanning above this document length (UTF-16 units) to protect
+/// typing latency. Lives at file scope because `FilePreviewTextEditor` is generic and
+/// its nested `Coordinator` cannot hold static stored properties.
+private let filePreviewMaxErrorScanLength = 500_000
+
 @MainActor
 protocol FilePreviewTextEditingPanel: AnyObject {
     var textContent: String { get }
@@ -122,17 +127,22 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
         /// fires while highlighting is attached).
         private var highlighter: TextViewHighlighter?
         private var highlightedLanguage: CodeLanguage?
+        /// Debounced syntax-error scan; cancelled and rescheduled on each edit.
+        private var errorScanTask: Task<Void, Never>?
 
         init(panel: PanelModel) {
             self.panel = panel
         }
 
-        deinit {}
+        deinit {
+            errorScanTask?.cancel()
+        }
 
         func textDidChange(_ notification: Notification) {
             guard !isApplyingPanelUpdate,
-                  let textView = notification.object as? NSTextView else { return }
+                  let textView = notification.object as? SavingTextView else { return }
             panel.updateTextContent(textView.string)
+            scheduleSyntaxErrorScan(on: textView, language: highlightedLanguage)
         }
 
         /// Attach, replace, or detach the syntax highlighter to match the requested
@@ -167,6 +177,7 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
                 highlighter = nil
                 highlightedLanguage = nil
             }
+            scheduleSyntaxErrorScan(on: textView, language: highlightedLanguage)
         }
 
         /// Drop the highlighter and restore the uniform foreground color, clearing any
@@ -179,6 +190,41 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
             let fullRange = NSRange(location: 0, length: storage.length)
             storage.removeAttribute(.foregroundColor, range: fullRange)
             storage.addAttribute(.foregroundColor, value: foregroundColor, range: fullRange)
+        }
+
+        /// Debounced, size-capped syntax-error scan. Underlines `ERROR`/`MISSING`
+        /// ranges using layout-manager temporary attributes (the spell-check
+        /// mechanism), which are independent of Neon's text-storage color attributes
+        /// and so coexist with highlighting. A `nil` language clears the underlines.
+        @MainActor
+        func scheduleSyntaxErrorScan(on textView: SavingTextView, language: CodeLanguage?) {
+            errorScanTask?.cancel()
+            errorScanTask = Task { @MainActor [weak self, weak textView] in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled, let self, let textView else { return }
+                self.runSyntaxErrorScan(on: textView, language: language)
+            }
+        }
+
+        @MainActor
+        private func runSyntaxErrorScan(on textView: SavingTextView, language: CodeLanguage?) {
+            guard let layoutManager = textView.layoutManager,
+                  let storage = textView.textStorage else { return }
+            let fullRange = NSRange(location: 0, length: storage.length)
+            layoutManager.removeTemporaryAttribute(.underlineStyle, forCharacterRange: fullRange)
+            layoutManager.removeTemporaryAttribute(.underlineColor, forCharacterRange: fullRange)
+
+            guard let language, storage.length <= filePreviewMaxErrorScanLength else { return }
+            let underline: [NSAttributedString.Key: Any] = [
+                .underlineStyle: NSUnderlineStyle.thick.rawValue | NSUnderlineStyle.patternDot.rawValue,
+                .underlineColor: NSColor.systemRed,
+            ]
+            for range in SyntaxErrorScanner.errorRanges(in: textView.string, language: language) {
+                let clamped = NSIntersectionRange(range, fullRange)
+                if clamped.length > 0 {
+                    layoutManager.addTemporaryAttributes(underline, forCharacterRange: clamped)
+                }
+            }
         }
     }
 }
