@@ -138,6 +138,17 @@ public enum CodeLanguage: String, CaseIterable, Sendable {
         }
     }
 
+    /// Whether this language ships a `tags.scm` grammar, i.e. supports a symbol
+    /// outline. Data/config formats (JSON, YAML, …) don't.
+    public var providesOutline: Bool {
+        switch self {
+        case .python, .typescript, .tsx, .javascript, .jsx, .go, .rust, .ruby, .java, .c:
+            return true
+        case .cpp, .json, .bash, .html, .css, .yaml, .toml, .dockerfile:
+            return false
+        }
+    }
+
     /// Whether to append the shared JSX highlight rules. The grammar query files
     /// don't color JSX tags/attributes, so we add them for the JSX-capable parsers.
     var includesJSXRules: Bool {

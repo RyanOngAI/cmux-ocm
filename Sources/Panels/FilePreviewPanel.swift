@@ -1049,6 +1049,30 @@ final class FilePreviewPanel: Panel, ObservableObject, FilePreviewTextEditingPan
         focusCoordinator.register(root: textView, primaryResponder: textView, intent: .textEditor)
     }
 
+    /// Whether the open file's language supports a symbol outline (cheap check; no parse).
+    var supportsCodeOutline: Bool {
+        previewMode == .text && (CodeLanguage.detect(path: filePath)?.providesOutline ?? false)
+    }
+
+    /// Parse the current content for its symbol outline (functions, classes, …).
+    func codeSymbols() -> [CodeSymbol] {
+        guard previewMode == .text, let language = CodeLanguage.detect(path: filePath) else { return [] }
+        return SymbolOutline.symbols(in: textContent, language: language)
+    }
+
+    /// Scroll the editor to a symbol and select its name. User-initiated, so taking
+    /// first-responder focus here is intended.
+    func scrollToSymbol(_ symbol: CodeSymbol) {
+        guard let textView else { return }
+        let length = (textView.string as NSString).length
+        guard symbol.nameRange.location <= length else { return }
+        let target = NSIntersectionRange(symbol.nameRange, NSRange(location: 0, length: length))
+        let range = target.length > 0 ? target : NSRange(location: symbol.nameRange.location, length: 0)
+        textView.scrollRangeToVisible(range)
+        textView.setSelectedRange(range)
+        textView.window?.makeFirstResponder(textView)
+    }
+
     func handleDroppedFileURLsAsText(_ urls: [URL]) -> Bool {
         guard previewMode == .text, let textView else { return false }
         let text = TerminalImageTransferPlanner.insertedText(forFileURLs: urls)
@@ -1339,6 +1363,10 @@ struct FilePreviewPanelView: View {
                     isDisabled: !panel.isDirty || panel.isSaving,
                     action: { panel.saveTextContent() }
                 )
+
+                if panel.supportsCodeOutline {
+                    FilePreviewOutlineButton(panel: panel)
+                }
             }
 
             FileExternalOpenMenu(fileURL: panel.fileURL, isDisabled: panel.isFileUnavailable)
