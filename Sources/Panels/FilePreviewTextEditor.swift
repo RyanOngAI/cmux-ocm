@@ -69,16 +69,9 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
             language: codeLanguage,
             foregroundColor: themeForegroundColor
         )
-
-        let ruler = FilePreviewLineNumberRulerView(scrollView: scrollView, textView: textView)
-        scrollView.verticalRulerView = ruler
-        scrollView.hasVerticalRuler = true
-        scrollView.rulersVisible = true
-        context.coordinator.lineNumberRuler = ruler
-        context.coordinator.updateLineNumberColors(
-            foreground: themeForegroundColor,
-            background: drawsBackground ? themeBackgroundColor : .clear
-        )
+        // Line-number gutter temporarily disabled: the NSRulerView interaction with
+        // this custom TextKit 1 text view mis-frames the document and hides the text.
+        // Needs proper debugging; see FilePreviewLineNumberRulerView.
         return scrollView
     }
 
@@ -102,11 +95,6 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
             language: codeLanguage,
             foregroundColor: themeForegroundColor
         )
-        context.coordinator.updateLineNumberColors(
-            foreground: themeForegroundColor,
-            background: drawsBackground ? themeBackgroundColor : .clear
-        )
-        context.coordinator.lineNumberRuler?.refresh()
         guard textView.string != panel.textContent else { return }
         context.coordinator.isApplyingPanelUpdate = true
         textView.string = panel.textContent
@@ -142,8 +130,6 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
         /// fires while highlighting is attached).
         private var highlighter: TextViewHighlighter?
         private var highlightedLanguage: CodeLanguage?
-        /// The line-number gutter, retained so it can be refreshed on edits.
-        var lineNumberRuler: FilePreviewLineNumberRulerView?
         /// Debounced syntax-error scan; cancelled and rescheduled on each edit.
         private var errorScanTask: Task<Void, Never>?
 
@@ -160,15 +146,6 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
                   let textView = notification.object as? SavingTextView else { return }
             panel.updateTextContent(textView.string)
             scheduleSyntaxErrorScan(on: textView, language: highlightedLanguage)
-            lineNumberRuler?.refresh()
-        }
-
-        /// Update the gutter colors to match the editor theme. The digits use a dimmed
-        /// foreground so they recede behind the code.
-        @MainActor
-        func updateLineNumberColors(foreground: NSColor, background: NSColor) {
-            lineNumberRuler?.numberColor = foreground.withAlphaComponent(0.45)
-            lineNumberRuler?.gutterBackgroundColor = background
         }
 
         /// Attach, replace, or detach the syntax highlighter to match the requested
