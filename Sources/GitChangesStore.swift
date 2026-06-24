@@ -1,5 +1,4 @@
 import Combine
-import CmuxFileWatch
 import CmuxFoundation
 import CmuxGit
 import Darwin

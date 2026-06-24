@@ -14,8 +14,8 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(path: "../CmuxSettings"),
-        .package(path: "../CmuxTestSupport"),
+        .package(path: "../macOS/CmuxSettings"),
+        .package(path: "../macOS/CmuxTestSupport"),
     ],
     targets: [
         .target(
