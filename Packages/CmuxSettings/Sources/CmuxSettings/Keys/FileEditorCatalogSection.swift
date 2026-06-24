@@ -19,6 +19,18 @@ public struct FileEditorCatalogSection: SettingCatalogSection {
         userDefaultsKey: "fileEditor.wordWrap"
     )
 
+    /// Whether code files are syntax-highlighted via tree-sitter.
+    ///
+    /// `true` (the default) colorizes supported code files (Python, TypeScript,
+    /// TSX, JavaScript, JSX) in the plain-text editor. `false` falls back to the
+    /// uniform single-color rendering. Changing this applies live to open editors;
+    /// unsupported file types are unaffected.
+    public let syntaxHighlighting = DefaultsKey<Bool>(
+        id: "fileEditor.syntaxHighlighting",
+        defaultValue: true,
+        userDefaultsKey: "fileEditor.syntaxHighlighting"
+    )
+
     /// Creates the file editor settings section with its default keys.
     public init() {}
 }

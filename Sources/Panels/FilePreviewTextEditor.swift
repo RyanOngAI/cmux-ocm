@@ -1,5 +1,12 @@
 import AppKit
+import CmuxCodeHighlighting
+import Neon
 import SwiftUI
+
+/// Skip syntax-error scanning above this document length (UTF-16 units) to protect
+/// typing latency. Lives at file scope because `FilePreviewTextEditor` is generic and
+/// its nested `Coordinator` cannot hold static stored properties.
+private let filePreviewMaxErrorScanLength = 500_000
 
 @MainActor
 protocol FilePreviewTextEditingPanel: AnyObject {
@@ -21,6 +28,12 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
     /// Whether long lines soft-wrap at the editor's right edge. Sourced from
     /// the persisted `fileEditor.wordWrap` setting; updates apply live.
     let wordWrap: Bool
+    /// Whether tree-sitter syntax highlighting is enabled, from the persisted
+    /// `fileEditor.syntaxHighlighting` setting; updates apply live.
+    let syntaxHighlightingEnabled: Bool
+    /// The language detected for the open file, or `nil` for unsupported types.
+    /// Highlighting attaches only when this is non-nil and highlighting is enabled.
+    let codeLanguage: CodeLanguage?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(panel: panel)
@@ -50,6 +63,28 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
             foregroundColor: themeForegroundColor,
             drawsBackground: drawsBackground
         )
+        context.coordinator.updateHighlighting(
+            on: textView,
+            enabled: syntaxHighlightingEnabled,
+            language: codeLanguage,
+            foregroundColor: themeForegroundColor
+        )
+
+        // Line-number gutter as a left-pinned OVERLAY view (not an NSRulerView).
+        // NSScrollView's ruler machinery re-tiled this custom TextKit 1 document and
+        // hid the code; an overlay never touches the scroll view's content geometry,
+        // so the text view fills the scroll view exactly as it does without a gutter.
+        // The code is pushed right by a matching left textContainerInset instead.
+        let gutter = FilePreviewLineNumberRulerView(scrollView: scrollView, textView: textView)
+        scrollView.addFloatingSubview(gutter, for: .vertical)
+        context.coordinator.lineNumberGutter = gutter
+        context.coordinator.updateLineNumberColors(
+            foreground: themeForegroundColor,
+            background: drawsBackground ? themeBackgroundColor : .clear
+        )
+        textView.lineNumberGutterWidth = gutter.width
+        textView.applyFilePreviewTextEditorInsets()
+        gutter.layoutGutter()
         return scrollView
     }
 
@@ -64,9 +99,24 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
         )
         guard let textView = scrollView.documentView as? SavingTextView else { return }
         textView.panel = panel
+        if let gutter = context.coordinator.lineNumberGutter {
+            gutter.refresh()
+            textView.lineNumberGutterWidth = gutter.width
+        }
         textView.applyFilePreviewTextEditorInsets()
         textView.applyFilePreviewWordWrap(wordWrap, scrollView: scrollView)
         panel.attachTextView(textView)
+        context.coordinator.updateHighlighting(
+            on: textView,
+            enabled: syntaxHighlightingEnabled,
+            language: codeLanguage,
+            foregroundColor: themeForegroundColor
+        )
+        context.coordinator.updateLineNumberColors(
+            foreground: themeForegroundColor,
+            background: drawsBackground ? themeBackgroundColor : .clear
+        )
+        context.coordinator.lineNumberGutter?.layoutGutter()
         guard textView.string != panel.textContent else { return }
         context.coordinator.isApplyingPanelUpdate = true
         textView.string = panel.textContent
@@ -96,16 +146,153 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
         var panel: PanelModel
         var isApplyingPanelUpdate = false
 
+        /// The active Neon highlighter, retained so it keeps styling the view. Neon
+        /// becomes the `NSTextStorage` delegate (a different slot than this object's
+        /// `NSTextView` delegate role, so `textDidChange` — and thus saving — still
+        /// fires while highlighting is attached).
+        private var highlighter: TextViewHighlighter?
+        private var highlightedLanguage: CodeLanguage?
+        /// The line-number gutter overlay, retained so it can be refreshed on edits.
+        var lineNumberGutter: FilePreviewLineNumberRulerView?
+        /// Debounced syntax-error scan; cancelled and rescheduled on each edit.
+        private var errorScanTask: Task<Void, Never>?
+
         init(panel: PanelModel) {
             self.panel = panel
         }
 
-        deinit {}
+        deinit {
+            errorScanTask?.cancel()
+        }
 
         func textDidChange(_ notification: Notification) {
             guard !isApplyingPanelUpdate,
-                  let textView = notification.object as? NSTextView else { return }
+                  let textView = notification.object as? SavingTextView else { return }
             panel.updateTextContent(textView.string)
+            scheduleSyntaxErrorScan(on: textView, language: highlightedLanguage)
+            // A length change can widen the largest line number (and thus the gutter),
+            // which feeds back into the text's left inset; recompute then re-layout.
+            if let gutter = lineNumberGutter {
+                gutter.refresh()
+                if textView.lineNumberGutterWidth != gutter.width {
+                    textView.lineNumberGutterWidth = gutter.width
+                    textView.applyFilePreviewTextEditorInsets()
+                }
+                gutter.layoutGutter()
+            }
+        }
+
+        /// Update the gutter colors to match the editor theme. The digits use a dimmed
+        /// foreground so they recede behind the code.
+        @MainActor
+        func updateLineNumberColors(foreground: NSColor, background: NSColor) {
+            lineNumberGutter?.numberColor = foreground.withAlphaComponent(0.45)
+            lineNumberGutter?.gutterBackgroundColor = background
+        }
+
+        /// Attach, replace, or detach the syntax highlighter to match the requested
+        /// enabled state and language. Idempotent: a no-op when nothing changed.
+        @MainActor
+        func updateHighlighting(
+            on textView: SavingTextView,
+            enabled: Bool,
+            language: CodeLanguage?,
+            foregroundColor: NSColor
+        ) {
+            let desired: CodeLanguage? = enabled ? language : nil
+            let isAttached = highlighter != nil
+            guard desired != highlightedLanguage || (desired != nil) != isAttached else { return }
+
+            if isAttached {
+                detachHighlighter(from: textView, foregroundColor: foregroundColor)
+            }
+            guard let language = desired else { return }
+
+            do {
+                let configuration = try CodeHighlighterFactory().makeConfiguration(for: language)
+                highlighter = try TextViewHighlighter(
+                    textView: textView,
+                    language: configuration.language,
+                    highlightQuery: configuration.highlightQuery,
+                    attributeProvider: configuration.attributeProvider
+                )
+                highlightedLanguage = language
+                primeInitialParse(on: textView)
+            } catch {
+                // Leave the view as plain text if the grammar/queries fail to load.
+                highlighter = nil
+                highlightedLanguage = nil
+            }
+            scheduleSyntaxErrorScan(on: textView, language: highlightedLanguage)
+        }
+
+        /// Force tree-sitter to parse text that was already in the storage when the highlighter
+        /// attached. Neon parses only through its `NSTextStorageDelegate` edit callbacks, but the
+        /// text view's content is set in `makeNSView` BEFORE the highlighter becomes that delegate,
+        /// so the parser's tree stays `nil` and every color query fails (`stateInvalid`) — the pane
+        /// renders unhighlighted. Async-loaded files dodge this because their text arrives later via
+        /// `updateNSView`; a split pane is born with the text already present, so nothing re-sets it,
+        /// which is why split panes specifically came up white. Re-assigning the string fires an
+        /// `.editedCharacters` change that drives the initial parse and first highlight. No-op for
+        /// empty storage. `isApplyingPanelUpdate` keeps this from looking like a user edit, undo is
+        /// suppressed so the no-op replacement leaves no entry, and `textView.string =` re-applies
+        /// the view's typing attributes so the monospaced font is preserved.
+        @MainActor
+        private func primeInitialParse(on textView: SavingTextView) {
+            guard let storage = textView.textStorage, storage.length > 0 else { return }
+            let text = textView.string
+            isApplyingPanelUpdate = true
+            textView.undoManager?.disableUndoRegistration()
+            textView.string = text
+            textView.undoManager?.enableUndoRegistration()
+            isApplyingPanelUpdate = false
+        }
+
+        /// Drop the highlighter and restore the uniform foreground color, clearing any
+        /// per-token colors it applied so disabling highlighting fully reverts the view.
+        @MainActor
+        private func detachHighlighter(from textView: SavingTextView, foregroundColor: NSColor) {
+            highlighter = nil
+            highlightedLanguage = nil
+            guard let storage = textView.textStorage else { return }
+            let fullRange = NSRange(location: 0, length: storage.length)
+            storage.removeAttribute(.foregroundColor, range: fullRange)
+            storage.addAttribute(.foregroundColor, value: foregroundColor, range: fullRange)
+        }
+
+        /// Debounced, size-capped syntax-error scan. Underlines `ERROR`/`MISSING`
+        /// ranges using layout-manager temporary attributes (the spell-check
+        /// mechanism), which are independent of Neon's text-storage color attributes
+        /// and so coexist with highlighting. A `nil` language clears the underlines.
+        @MainActor
+        func scheduleSyntaxErrorScan(on textView: SavingTextView, language: CodeLanguage?) {
+            errorScanTask?.cancel()
+            errorScanTask = Task { @MainActor [weak self, weak textView] in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled, let self, let textView else { return }
+                self.runSyntaxErrorScan(on: textView, language: language)
+            }
+        }
+
+        @MainActor
+        private func runSyntaxErrorScan(on textView: SavingTextView, language: CodeLanguage?) {
+            guard let layoutManager = textView.layoutManager,
+                  let storage = textView.textStorage else { return }
+            let fullRange = NSRange(location: 0, length: storage.length)
+            layoutManager.removeTemporaryAttribute(.underlineStyle, forCharacterRange: fullRange)
+            layoutManager.removeTemporaryAttribute(.underlineColor, forCharacterRange: fullRange)
+
+            guard let language, storage.length <= filePreviewMaxErrorScanLength else { return }
+            let underline: [NSAttributedString.Key: Any] = [
+                .underlineStyle: NSUnderlineStyle.thick.rawValue | NSUnderlineStyle.patternDot.rawValue,
+                .underlineColor: NSColor.systemRed,
+            ]
+            for range in SyntaxErrorScanner().errorRanges(in: textView.string, language: language) {
+                let clamped = NSIntersectionRange(range, fullRange)
+                if clamped.length > 0 {
+                    layoutManager.addTemporaryAttributes(underline, forCharacterRange: clamped)
+                }
+            }
         }
     }
 }
@@ -199,9 +386,17 @@ extension NSTextView {
     }
 
     func applyFilePreviewTextEditorInsets() {
-        let targetInset = FilePreviewTextEditorLayout.textContainerInset
-        if textContainerInset.width != targetInset.width || textContainerInset.height != targetInset.height {
-            textContainerInset = targetInset
+        let base = FilePreviewTextEditorLayout.textContainerInset
+        // The line-number gutter is a left-pinned overlay; push the code right by the
+        // gutter width so glyphs never draw under it. `textContainerInset` is symmetric
+        // in AppKit, so this also widens the right inset by the same amount, which is
+        // harmless (extra right margin in no-wrap mode, a slightly narrower wrap width
+        // in wrap mode). `lineNumberGutterWidth` is 0 on plain NSTextView subclasses,
+        // so non-gutter callers keep the original inset.
+        let gutterWidth = (self as? SavingTextView)?.lineNumberGutterWidth ?? 0
+        let targetWidth = base.width + gutterWidth
+        if textContainerInset.width != targetWidth || textContainerInset.height != base.height {
+            textContainerInset = NSSize(width: targetWidth, height: base.height)
         }
         if textContainer?.lineFragmentPadding != FilePreviewTextEditorLayout.lineFragmentPadding {
             textContainer?.lineFragmentPadding = FilePreviewTextEditorLayout.lineFragmentPadding
@@ -215,6 +410,10 @@ final class SavingTextView: NSTextView {
     private static let maximumPreviewFontSize: CGFloat = 36
 
     weak var panel: (any FilePreviewTextEditingPanel)?
+    /// Width reserved on the left for the line-number gutter overlay. Added to the
+    /// text container's left inset by `applyFilePreviewTextEditorInsets()` so code
+    /// never draws under the gutter. 0 until a gutter is attached.
+    var lineNumberGutterWidth: CGFloat = 0
     private var previewFontSize: CGFloat = 13
     private var pendingSaveShortcutChordPrefix: ShortcutStroke?
 

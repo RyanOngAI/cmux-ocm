@@ -104,7 +104,11 @@ struct MarkdownPanelView: View {
                     themeBackgroundColor: appearance.contentBackgroundColor,
                     themeForegroundColor: themeForegroundColor,
                     drawsBackground: appearance.drawsContentBackground,
-                    wordWrap: fileEditorWordWrap
+                    wordWrap: fileEditorWordWrap,
+                    // The markdown raw-source editor stays plain text; markdown is
+                    // rendered via the WKWebView preview, not tree-sitter.
+                    syntaxHighlightingEnabled: false,
+                    codeLanguage: nil
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
