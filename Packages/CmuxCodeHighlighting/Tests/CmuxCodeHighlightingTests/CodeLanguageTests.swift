@@ -27,6 +27,17 @@ struct CodeLanguageTests {
         #expect(CodeLanguage.detect(fileExtension: "cpp") == .cpp)
         #expect(CodeLanguage.detect(fileExtension: "rb") == .ruby)
         #expect(CodeLanguage.detect(fileExtension: "java") == .java)
+        #expect(CodeLanguage.detect(fileExtension: "yml") == .yaml)
+        #expect(CodeLanguage.detect(fileExtension: "yaml") == .yaml)
+        #expect(CodeLanguage.detect(fileExtension: "toml") == .toml)
+    }
+
+    @Test("Detects Dockerfile by filename (no extension)")
+    func detectsDockerfileByName() {
+        #expect(CodeLanguage.detect(path: "/app/Dockerfile") == .dockerfile)
+        #expect(CodeLanguage.detect(path: "/app/Dockerfile.dev") == .dockerfile)
+        #expect(CodeLanguage.detect(path: "/app/api.dockerfile") == .dockerfile)
+        #expect(CodeLanguage.detect(path: "/app/notes.txt") == nil)
     }
 
     @Test("Returns nil for unsupported or empty extensions")

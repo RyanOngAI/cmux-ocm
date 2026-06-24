@@ -54,6 +54,10 @@ let package = Package(
         .package(url: "https://github.com/tree-sitter/tree-sitter-cpp", exact: "0.23.4"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-ruby", exact: "0.23.1"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-java", exact: "0.23.5"),
+        // Config / scripting / data languages from other orgs (SPM-supported).
+        .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-yaml", exact: "0.7.0"),
+        .package(url: "https://github.com/tree-sitter-grammars/tree-sitter-toml", exact: "0.7.0"),
+        .package(url: "https://github.com/camdencheek/tree-sitter-dockerfile", exact: "0.2.0"),
     ],
     targets: [
         .target(
@@ -74,6 +78,9 @@ let package = Package(
                 .product(name: "TreeSitterCPP", package: "tree-sitter-cpp"),
                 .product(name: "TreeSitterRuby", package: "tree-sitter-ruby"),
                 .product(name: "TreeSitterJava", package: "tree-sitter-java"),
+                .product(name: "TreeSitterYAML", package: "tree-sitter-yaml"),
+                .product(name: "TreeSitterTOML", package: "tree-sitter-toml"),
+                .product(name: "TreeSitterDockerfile", package: "tree-sitter-dockerfile"),
             ]
         ),
         .testTarget(

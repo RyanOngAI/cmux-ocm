@@ -4,6 +4,7 @@ import TreeSitterBash
 import TreeSitterC
 import TreeSitterCPP
 import TreeSitterCSS
+import TreeSitterDockerfile
 import TreeSitterGo
 import TreeSitterHTML
 import TreeSitterJSON
@@ -12,8 +13,10 @@ import TreeSitterJavaScript
 import TreeSitterPython
 import TreeSitterRuby
 import TreeSitterRust
+import TreeSitterTOML
 import TreeSitterTSX
 import TreeSitterTypeScript
+import TreeSitterYAML
 
 /// A source language cmux can syntax-highlight in the file preview.
 ///
@@ -36,10 +39,20 @@ public enum CodeLanguage: String, CaseIterable, Sendable {
     case cpp
     case ruby
     case java
+    case yaml
+    case toml
+    case dockerfile
 
     /// Detect a supported language from a file path. Returns `nil` for unsupported types.
+    ///
+    /// Checks the filename first (so extensionless files like `Dockerfile` are matched),
+    /// then falls back to the file extension.
     public static func detect(path: String) -> CodeLanguage? {
-        detect(fileExtension: (path as NSString).pathExtension)
+        let filename = (path as NSString).lastPathComponent.lowercased()
+        if filename == "dockerfile" || filename.hasPrefix("dockerfile.") || filename.hasSuffix(".dockerfile") {
+            return .dockerfile
+        }
+        return detect(fileExtension: (path as NSString).pathExtension)
     }
 
     /// Detect a supported language from a (case-insensitive) file extension.
@@ -60,6 +73,9 @@ public enum CodeLanguage: String, CaseIterable, Sendable {
         case "cpp", "cc", "cxx", "hpp", "hh", "hxx": return .cpp
         case "rb": return .ruby
         case "java": return .java
+        case "yml", "yaml": return .yaml
+        case "toml": return .toml
+        case "dockerfile": return .dockerfile
         default: return nil
         }
     }
@@ -85,6 +101,9 @@ public enum CodeLanguage: String, CaseIterable, Sendable {
         case .cpp: return Language(language: tree_sitter_cpp())
         case .ruby: return Language(language: tree_sitter_ruby())
         case .java: return Language(language: tree_sitter_java())
+        case .yaml: return Language(language: tree_sitter_yaml())
+        case .toml: return Language(language: tree_sitter_toml())
+        case .dockerfile: return Language(language: tree_sitter_dockerfile())
         }
     }
 
@@ -113,6 +132,9 @@ public enum CodeLanguage: String, CaseIterable, Sendable {
         case .cpp: return ["TreeSitterCPP_TreeSitterCPP"]
         case .ruby: return ["TreeSitterRuby_TreeSitterRuby"]
         case .java: return ["TreeSitterJava_TreeSitterJava"]
+        case .yaml: return ["TreeSitterYAML_TreeSitterYAML"]
+        case .toml: return ["TreeSitterTOML_TreeSitterTOML"]
+        case .dockerfile: return ["TreeSitterDockerfile_TreeSitterDockerfile"]
         }
     }
 
