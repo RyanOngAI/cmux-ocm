@@ -1,12 +1,13 @@
 import AppKit
+import Foundation
 import Neon
 import SwiftTreeSitter
 
 public enum CodeHighlightingError: Error {
-    /// The grammar's query resource bundle could not be located at runtime.
+    /// A grammar's query resource bundle could not be located at runtime.
     case missingQueryBundle(CodeLanguage)
-    /// The grammar's resource bundle did not contain a highlights query.
-    case missingHighlightQuery(CodeLanguage)
+    /// None of the language's bundles yielded a usable highlights query.
+    case emptyHighlightQuery(CodeLanguage)
 }
 
 /// Everything U4 needs to attach a Neon `TextViewHighlighter` for one language:
@@ -20,17 +21,28 @@ public struct CodeHighlighterConfiguration {
 /// Builds the per-language pieces needed to highlight a text view. Kept free of any
 /// `NSTextView` reference so it is unit-testable without a live view.
 public enum CodeHighlighterFactory {
-    /// Load the tree-sitter `LanguageConfiguration` (and its bundled highlight queries)
-    /// for `language`. Throws if the grammar's resource bundle cannot be found or parsed.
-    public static func languageConfiguration(for language: CodeLanguage) throws -> LanguageConfiguration {
-        guard let queriesURL = GrammarBundleLocator.queriesDirectoryURL(forBundleNamed: language.queryBundleName) else {
-            throw CodeHighlightingError.missingQueryBundle(language)
+    /// Build the combined highlight query for `language` by concatenating the
+    /// `highlights.scm` of each of its grammar bundles (base grammar first), then
+    /// appending the shared JSX rules where applicable. Compiled against the
+    /// language's parser.
+    public static func highlightQuery(for language: CodeLanguage) throws -> Query {
+        var combined = ""
+        for bundleName in language.highlightBundleNames {
+            guard let queriesURL = GrammarBundleLocator.queriesDirectoryURL(forBundleNamed: bundleName) else {
+                throw CodeHighlightingError.missingQueryBundle(language)
+            }
+            let scmURL = queriesURL.appendingPathComponent("highlights.scm")
+            if let scm = try? String(contentsOf: scmURL, encoding: .utf8) {
+                combined += scm + "\n"
+            }
         }
-        return try LanguageConfiguration(
-            language.tsLanguage,
-            name: language.configurationName,
-            queriesURL: queriesURL
-        )
+        if language.includesJSXRules {
+            combined += "\n" + CodeLanguage.jsxHighlightRules + "\n"
+        }
+        guard !combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CodeHighlightingError.emptyHighlightQuery(language)
+        }
+        return try Query(language: language.parserLanguage, data: Data(combined.utf8))
     }
 
     /// Build the configuration needed to attach a highlighter for `language`.
@@ -38,13 +50,9 @@ public enum CodeHighlighterFactory {
         for language: CodeLanguage,
         theme: CodeTheme = .dark
     ) throws -> CodeHighlighterConfiguration {
-        let languageConfig = try languageConfiguration(for: language)
-        guard let highlightQuery = languageConfig.queries[.highlights] else {
-            throw CodeHighlightingError.missingHighlightQuery(language)
-        }
-        return CodeHighlighterConfiguration(
-            language: language.tsLanguage,
-            highlightQuery: highlightQuery,
+        CodeHighlighterConfiguration(
+            language: language.parserLanguage,
+            highlightQuery: try highlightQuery(for: language),
             attributeProvider: theme.makeAttributeProvider()
         )
     }

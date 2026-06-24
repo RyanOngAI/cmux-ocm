@@ -35,14 +35,21 @@ struct CodeHighlighterFactoryTests {
         return nil
     }()
 
-    /// Validates the runtime query-bundle loading flagged as a risk in the plan:
-    /// every grammar's `highlights.scm` must resolve and parse — including TSX, whose
-    /// queries are a known sharp edge (inheritance from the JS/TS base grammars).
-    @Test("Highlight queries load for every language", arguments: CodeLanguage.allCases)
-    func loadsHighlightQuery(_ language: CodeLanguage) throws {
-        let config = try CodeHighlighterFactory.languageConfiguration(for: language)
-        let highlights = try #require(config.queries[.highlights])
-        #expect(highlights.patternCount > 0)
+    /// Every language's combined highlight query must load from its bundles and
+    /// compile against its parser — including the TS/TSX concatenation and the
+    /// appended JSX rules (the sharp edges flagged in the plan).
+    @Test("Highlight query compiles for every language", arguments: CodeLanguage.allCases)
+    func highlightQueryCompiles(_ language: CodeLanguage) throws {
+        let query = try CodeHighlighterFactory.highlightQuery(for: language)
+        #expect(query.patternCount > 0)
+    }
+
+    @Test("TSX query includes JSX tag/attribute rules")
+    func tsxIncludesJSXCaptures() throws {
+        let query = try CodeHighlighterFactory.highlightQuery(for: .tsx)
+        let captureNames = Set((0..<query.captureCount).compactMap { query.captureName(for: $0) })
+        #expect(captureNames.contains("tag"))
+        #expect(captureNames.contains("attribute"))
     }
 
     @Test("makeConfiguration yields a usable language + query + provider")

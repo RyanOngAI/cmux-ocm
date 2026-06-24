@@ -14,6 +14,21 @@ struct CodeLanguageTests {
         #expect(CodeLanguage.detect(fileExtension: "jsx") == .jsx)
     }
 
+    @Test("Detects the additional common languages by extension")
+    func detectsAdditionalLanguages() {
+        #expect(CodeLanguage.detect(fileExtension: "json") == .json)
+        #expect(CodeLanguage.detect(fileExtension: "sh") == .bash)
+        #expect(CodeLanguage.detect(fileExtension: "zsh") == .bash)
+        #expect(CodeLanguage.detect(fileExtension: "html") == .html)
+        #expect(CodeLanguage.detect(fileExtension: "css") == .css)
+        #expect(CodeLanguage.detect(fileExtension: "go") == .go)
+        #expect(CodeLanguage.detect(fileExtension: "rs") == .rust)
+        #expect(CodeLanguage.detect(fileExtension: "c") == .c)
+        #expect(CodeLanguage.detect(fileExtension: "cpp") == .cpp)
+        #expect(CodeLanguage.detect(fileExtension: "rb") == .ruby)
+        #expect(CodeLanguage.detect(fileExtension: "java") == .java)
+    }
+
     @Test("Returns nil for unsupported or empty extensions")
     func ignoresUnsupported() {
         #expect(CodeLanguage.detect(fileExtension: "md") == nil)

@@ -41,6 +41,19 @@ let package = Package(
         .package(url: "https://github.com/tree-sitter/tree-sitter-typescript", exact: "0.23.2"),
         // tree-sitter-javascript covers both JavaScript and JSX (tree_sitter_javascript).
         .package(url: "https://github.com/tree-sitter/tree-sitter-javascript", exact: "0.23.1"),
+        // Additional common languages. Versions are chosen so each grammar's
+        // SwiftTreeSitter dependency permits the 0.8.0 pin above (css/go/rust ship a
+        // newer line that requires 0.9.0+, so they are pinned to an older tag).
+        .package(url: "https://github.com/tree-sitter/tree-sitter-json", exact: "0.24.8"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-bash", exact: "0.23.3"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-html", exact: "0.23.2"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-css", exact: "0.23.2"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-go", exact: "0.23.0"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-rust", exact: "0.23.0"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-c", exact: "0.23.4"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-cpp", exact: "0.23.4"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-ruby", exact: "0.23.1"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-java", exact: "0.23.5"),
     ],
     targets: [
         .target(
@@ -51,6 +64,16 @@ let package = Package(
                 .product(name: "TreeSitterPython", package: "tree-sitter-python"),
                 .product(name: "TreeSitterTypeScript", package: "tree-sitter-typescript"),
                 .product(name: "TreeSitterJavaScript", package: "tree-sitter-javascript"),
+                .product(name: "TreeSitterJSON", package: "tree-sitter-json"),
+                .product(name: "TreeSitterBash", package: "tree-sitter-bash"),
+                .product(name: "TreeSitterHTML", package: "tree-sitter-html"),
+                .product(name: "TreeSitterCSS", package: "tree-sitter-css"),
+                .product(name: "TreeSitterGo", package: "tree-sitter-go"),
+                .product(name: "TreeSitterRust", package: "tree-sitter-rust"),
+                .product(name: "TreeSitterC", package: "tree-sitter-c"),
+                .product(name: "TreeSitterCPP", package: "tree-sitter-cpp"),
+                .product(name: "TreeSitterRuby", package: "tree-sitter-ruby"),
+                .product(name: "TreeSitterJava", package: "tree-sitter-java"),
             ]
         ),
         .testTarget(
