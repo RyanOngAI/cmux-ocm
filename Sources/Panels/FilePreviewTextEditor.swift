@@ -69,9 +69,22 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
             language: codeLanguage,
             foregroundColor: themeForegroundColor
         )
-        // Line-number gutter temporarily disabled: the NSRulerView interaction with
-        // this custom TextKit 1 text view mis-frames the document and hides the text.
-        // Needs proper debugging; see FilePreviewLineNumberRulerView.
+
+        // Line-number gutter as a left-pinned OVERLAY view (not an NSRulerView).
+        // NSScrollView's ruler machinery re-tiled this custom TextKit 1 document and
+        // hid the code; an overlay never touches the scroll view's content geometry,
+        // so the text view fills the scroll view exactly as it does without a gutter.
+        // The code is pushed right by a matching left textContainerInset instead.
+        let gutter = FilePreviewLineNumberRulerView(scrollView: scrollView, textView: textView)
+        scrollView.addFloatingSubview(gutter, for: .vertical)
+        context.coordinator.lineNumberGutter = gutter
+        context.coordinator.updateLineNumberColors(
+            foreground: themeForegroundColor,
+            background: drawsBackground ? themeBackgroundColor : .clear
+        )
+        textView.lineNumberGutterWidth = gutter.width
+        textView.applyFilePreviewTextEditorInsets()
+        gutter.layoutGutter()
         return scrollView
     }
 
@@ -86,6 +99,10 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
         )
         guard let textView = scrollView.documentView as? SavingTextView else { return }
         textView.panel = panel
+        if let gutter = context.coordinator.lineNumberGutter {
+            gutter.refresh()
+            textView.lineNumberGutterWidth = gutter.width
+        }
         textView.applyFilePreviewTextEditorInsets()
         textView.applyFilePreviewWordWrap(wordWrap, scrollView: scrollView)
         panel.attachTextView(textView)
@@ -95,6 +112,11 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
             language: codeLanguage,
             foregroundColor: themeForegroundColor
         )
+        context.coordinator.updateLineNumberColors(
+            foreground: themeForegroundColor,
+            background: drawsBackground ? themeBackgroundColor : .clear
+        )
+        context.coordinator.lineNumberGutter?.layoutGutter()
         guard textView.string != panel.textContent else { return }
         context.coordinator.isApplyingPanelUpdate = true
         textView.string = panel.textContent
@@ -130,6 +152,8 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
         /// fires while highlighting is attached).
         private var highlighter: TextViewHighlighter?
         private var highlightedLanguage: CodeLanguage?
+        /// The line-number gutter overlay, retained so it can be refreshed on edits.
+        var lineNumberGutter: FilePreviewLineNumberRulerView?
         /// Debounced syntax-error scan; cancelled and rescheduled on each edit.
         private var errorScanTask: Task<Void, Never>?
 
@@ -146,6 +170,24 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
                   let textView = notification.object as? SavingTextView else { return }
             panel.updateTextContent(textView.string)
             scheduleSyntaxErrorScan(on: textView, language: highlightedLanguage)
+            // A length change can widen the largest line number (and thus the gutter),
+            // which feeds back into the text's left inset; recompute then re-layout.
+            if let gutter = lineNumberGutter {
+                gutter.refresh()
+                if textView.lineNumberGutterWidth != gutter.width {
+                    textView.lineNumberGutterWidth = gutter.width
+                    textView.applyFilePreviewTextEditorInsets()
+                }
+                gutter.layoutGutter()
+            }
+        }
+
+        /// Update the gutter colors to match the editor theme. The digits use a dimmed
+        /// foreground so they recede behind the code.
+        @MainActor
+        func updateLineNumberColors(foreground: NSColor, background: NSColor) {
+            lineNumberGutter?.numberColor = foreground.withAlphaComponent(0.45)
+            lineNumberGutter?.gutterBackgroundColor = background
         }
 
         /// Attach, replace, or detach the syntax highlighter to match the requested
@@ -321,9 +363,17 @@ extension NSTextView {
     }
 
     func applyFilePreviewTextEditorInsets() {
-        let targetInset = FilePreviewTextEditorLayout.textContainerInset
-        if textContainerInset.width != targetInset.width || textContainerInset.height != targetInset.height {
-            textContainerInset = targetInset
+        let base = FilePreviewTextEditorLayout.textContainerInset
+        // The line-number gutter is a left-pinned overlay; push the code right by the
+        // gutter width so glyphs never draw under it. `textContainerInset` is symmetric
+        // in AppKit, so this also widens the right inset by the same amount, which is
+        // harmless (extra right margin in no-wrap mode, a slightly narrower wrap width
+        // in wrap mode). `lineNumberGutterWidth` is 0 on plain NSTextView subclasses,
+        // so non-gutter callers keep the original inset.
+        let gutterWidth = (self as? SavingTextView)?.lineNumberGutterWidth ?? 0
+        let targetWidth = base.width + gutterWidth
+        if textContainerInset.width != targetWidth || textContainerInset.height != base.height {
+            textContainerInset = NSSize(width: targetWidth, height: base.height)
         }
         if textContainer?.lineFragmentPadding != FilePreviewTextEditorLayout.lineFragmentPadding {
             textContainer?.lineFragmentPadding = FilePreviewTextEditorLayout.lineFragmentPadding
@@ -337,6 +387,10 @@ final class SavingTextView: NSTextView {
     private static let maximumPreviewFontSize: CGFloat = 36
 
     weak var panel: (any FilePreviewTextEditingPanel)?
+    /// Width reserved on the left for the line-number gutter overlay. Added to the
+    /// text container's left inset by `applyFilePreviewTextEditorInsets()` so code
+    /// never draws under the gutter. 0 until a gutter is attached.
+    var lineNumberGutterWidth: CGFloat = 0
     private var previewFontSize: CGFloat = 13
     private var pendingSaveShortcutChordPrefix: ShortcutStroke?
 
