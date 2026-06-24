@@ -1057,7 +1057,7 @@ final class FilePreviewPanel: Panel, ObservableObject, FilePreviewTextEditingPan
     /// Parse the current content for its symbol outline (functions, classes, …).
     func codeSymbols() -> [CodeSymbol] {
         guard previewMode == .text, let language = CodeLanguage.detect(path: filePath) else { return [] }
-        return SymbolOutline.symbols(in: textContent, language: language)
+        return SymbolOutline().symbols(in: textContent, language: language)
     }
 
     /// Scroll the editor to a symbol and select its name. User-initiated, so taking

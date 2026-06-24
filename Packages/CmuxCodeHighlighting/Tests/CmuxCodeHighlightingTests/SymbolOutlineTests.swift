@@ -23,7 +23,7 @@ struct SymbolOutlineTests {
         def second():
             return 3
         """
-        let symbols = SymbolOutline.symbols(in: source, language: .python)
+        let symbols = SymbolOutline().symbols(in: source, language: .python)
         let names = symbols.map(\.name)
         #expect(names.contains("first"))
         #expect(names.contains("Widget"))
@@ -41,13 +41,13 @@ struct SymbolOutlineTests {
         export function load(): void {}
         class Store {}
         """
-        let names = SymbolOutline.symbols(in: source, language: .typescript).map(\.name)
+        let names = SymbolOutline().symbols(in: source, language: .typescript).map(\.name)
         #expect(names.contains("load"))
         #expect(names.contains("Store"))
     }
 
     @Test("Returns no symbols for formats without a tags grammar")
     func noSymbolsForJSON() {
-        #expect(SymbolOutline.symbols(in: "{\"a\": 1}", language: .json).isEmpty)
+        #expect(SymbolOutline().symbols(in: "{\"a\": 1}", language: .json).isEmpty)
     }
 }

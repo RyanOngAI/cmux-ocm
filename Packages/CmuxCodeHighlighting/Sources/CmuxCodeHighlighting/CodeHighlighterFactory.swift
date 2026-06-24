@@ -20,12 +20,14 @@ public struct CodeHighlighterConfiguration {
 
 /// Builds the per-language pieces needed to highlight a text view. Kept free of any
 /// `NSTextView` reference so it is unit-testable without a live view.
-public enum CodeHighlighterFactory {
+public struct CodeHighlighterFactory {
+    public init() {}
+
     /// Build the combined highlight query for `language` by concatenating the
     /// `highlights.scm` of each of its grammar bundles (base grammar first), then
     /// appending the shared JSX rules where applicable. Compiled against the
     /// language's parser.
-    public static func highlightQuery(for language: CodeLanguage) throws -> Query {
+    public func highlightQuery(for language: CodeLanguage) throws -> Query {
         var combined = ""
         for bundleName in language.highlightBundleNames {
             guard let queriesURL = GrammarBundleLocator.queriesDirectoryURL(forBundleNamed: bundleName) else {
@@ -46,7 +48,7 @@ public enum CodeHighlighterFactory {
     }
 
     /// Build the configuration needed to attach a highlighter for `language`.
-    public static func makeConfiguration(
+    public func makeConfiguration(
         for language: CodeLanguage,
         theme: CodeTheme = .dark
     ) throws -> CodeHighlighterConfiguration {

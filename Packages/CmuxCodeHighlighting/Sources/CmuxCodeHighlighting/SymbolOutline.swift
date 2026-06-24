@@ -18,8 +18,10 @@ public struct CodeSymbol: Identifiable, Hashable, Sendable {
 /// Extracts the symbol outline from a source file using each grammar's `tags.scm`
 /// query (the same data that powers ctags-style navigation). Languages without a
 /// `tags.scm` (most config/data formats) yield no symbols.
-public enum SymbolOutline {
-    public static func symbols(in text: String, language: CodeLanguage) -> [CodeSymbol] {
+public struct SymbolOutline {
+    public init() {}
+
+    public func symbols(in text: String, language: CodeLanguage) -> [CodeSymbol] {
         // Concatenate each bundle's tags.scm (base grammar first), mirroring how
         // highlight queries are combined: TS/TSX ship only their delta and rely on the
         // JavaScript base for function/class definitions.
@@ -42,7 +44,7 @@ public enum SymbolOutline {
         }
 
         let source = text as NSString
-        let lineStarts = Self.lineStartIndices(source)
+        let lineStarts = lineStartIndices(source)
         var symbols: [CodeSymbol] = []
         var seenLocations = Set<Int>()
 
@@ -67,13 +69,13 @@ public enum SymbolOutline {
                 name: name,
                 kind: kind,
                 nameRange: nameRange,
-                line: Self.line(for: nameRange.location, in: lineStarts)
+                line: line(for: nameRange.location, in: lineStarts)
             ))
         }
         return symbols.sorted { $0.nameRange.location < $1.nameRange.location }
     }
 
-    private static func lineStartIndices(_ text: NSString) -> [Int] {
+    private func lineStartIndices(_ text: NSString) -> [Int] {
         var starts: [Int] = [0]
         var index = 0
         while index < text.length {
@@ -85,7 +87,7 @@ public enum SymbolOutline {
         return starts
     }
 
-    private static func line(for characterIndex: Int, in lineStarts: [Int]) -> Int {
+    private func line(for characterIndex: Int, in lineStarts: [Int]) -> Int {
         var low = 0
         var high = lineStarts.count - 1
         var answer = 0

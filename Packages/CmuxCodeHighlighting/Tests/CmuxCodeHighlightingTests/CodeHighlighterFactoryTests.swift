@@ -40,13 +40,13 @@ struct CodeHighlighterFactoryTests {
     /// appended JSX rules (the sharp edges flagged in the plan).
     @Test("Highlight query compiles for every language", arguments: CodeLanguage.allCases)
     func highlightQueryCompiles(_ language: CodeLanguage) throws {
-        let query = try CodeHighlighterFactory.highlightQuery(for: language)
+        let query = try CodeHighlighterFactory().highlightQuery(for: language)
         #expect(query.patternCount > 0)
     }
 
     @Test("TSX query includes JSX tag/attribute rules")
     func tsxIncludesJSXCaptures() throws {
-        let query = try CodeHighlighterFactory.highlightQuery(for: .tsx)
+        let query = try CodeHighlighterFactory().highlightQuery(for: .tsx)
         let captureNames = Set((0..<query.captureCount).compactMap { query.captureName(for: $0) })
         #expect(captureNames.contains("tag"))
         #expect(captureNames.contains("attribute"))
@@ -54,7 +54,7 @@ struct CodeHighlighterFactoryTests {
 
     @Test("makeConfiguration yields a usable language + query + provider")
     func makeConfigurationSucceeds() throws {
-        let config = try CodeHighlighterFactory.makeConfiguration(for: .python)
+        let config = try CodeHighlighterFactory().makeConfiguration(for: .python)
         #expect(config.highlightQuery.patternCount > 0)
         let attrs = config.attributeProvider(.init(name: "keyword", range: NSRange(location: 0, length: 1)))
         #expect(attrs[.foregroundColor] != nil)

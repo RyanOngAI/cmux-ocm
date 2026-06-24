@@ -209,7 +209,7 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
             guard let language = desired else { return }
 
             do {
-                let configuration = try CodeHighlighterFactory.makeConfiguration(for: language)
+                let configuration = try CodeHighlighterFactory().makeConfiguration(for: language)
                 highlighter = try TextViewHighlighter(
                     textView: textView,
                     language: configuration.language,
@@ -287,7 +287,7 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
                 .underlineStyle: NSUnderlineStyle.thick.rawValue | NSUnderlineStyle.patternDot.rawValue,
                 .underlineColor: NSColor.systemRed,
             ]
-            for range in SyntaxErrorScanner.errorRanges(in: textView.string, language: language) {
+            for range in SyntaxErrorScanner().errorRanges(in: textView.string, language: language) {
                 let clamped = NSIntersectionRange(range, fullRange)
                 if clamped.length > 0 {
                     layoutManager.addTemporaryAttributes(underline, forCharacterRange: clamped)

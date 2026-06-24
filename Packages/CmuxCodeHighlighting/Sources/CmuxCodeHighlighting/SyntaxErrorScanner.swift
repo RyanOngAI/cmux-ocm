@@ -8,10 +8,12 @@ import SwiftTreeSitter
 /// that is syntactically valid but semantically wrong (undefined variable, type
 /// mismatch) parses clean here. Semantic diagnostics require a language server and
 /// are out of scope.
-public enum SyntaxErrorScanner {
+public struct SyntaxErrorScanner {
+    public init() {}
+
     /// Parse `text` for `language` and return the character ranges of syntax errors.
     /// Empty when the document is syntactically valid (or fails to parse at all).
-    public static func errorRanges(in text: String, language: CodeLanguage) -> [NSRange] {
+    public func errorRanges(in text: String, language: CodeLanguage) -> [NSRange] {
         let parser = Parser()
         do {
             try parser.setLanguage(language.parserLanguage)
