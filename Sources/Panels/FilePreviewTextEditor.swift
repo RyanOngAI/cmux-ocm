@@ -217,12 +217,35 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
                     attributeProvider: configuration.attributeProvider
                 )
                 highlightedLanguage = language
+                primeInitialParse(on: textView)
             } catch {
                 // Leave the view as plain text if the grammar/queries fail to load.
                 highlighter = nil
                 highlightedLanguage = nil
             }
             scheduleSyntaxErrorScan(on: textView, language: highlightedLanguage)
+        }
+
+        /// Force tree-sitter to parse text that was already in the storage when the highlighter
+        /// attached. Neon parses only through its `NSTextStorageDelegate` edit callbacks, but the
+        /// text view's content is set in `makeNSView` BEFORE the highlighter becomes that delegate,
+        /// so the parser's tree stays `nil` and every color query fails (`stateInvalid`) — the pane
+        /// renders unhighlighted. Async-loaded files dodge this because their text arrives later via
+        /// `updateNSView`; a split pane is born with the text already present, so nothing re-sets it,
+        /// which is why split panes specifically came up white. Re-assigning the string fires an
+        /// `.editedCharacters` change that drives the initial parse and first highlight. No-op for
+        /// empty storage. `isApplyingPanelUpdate` keeps this from looking like a user edit, undo is
+        /// suppressed so the no-op replacement leaves no entry, and `textView.string =` re-applies
+        /// the view's typing attributes so the monospaced font is preserved.
+        @MainActor
+        private func primeInitialParse(on textView: SavingTextView) {
+            guard let storage = textView.textStorage, storage.length > 0 else { return }
+            let text = textView.string
+            isApplyingPanelUpdate = true
+            textView.undoManager?.disableUndoRegistration()
+            textView.string = text
+            textView.undoManager?.enableUndoRegistration()
+            isApplyingPanelUpdate = false
         }
 
         /// Drop the highlighter and restore the uniform foreground color, clearing any
