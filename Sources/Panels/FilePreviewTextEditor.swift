@@ -1,4 +1,6 @@
 import AppKit
+import CmuxCodeHighlighting
+import Neon
 import SwiftUI
 
 @MainActor
@@ -21,6 +23,12 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
     /// Whether long lines soft-wrap at the editor's right edge. Sourced from
     /// the persisted `fileEditor.wordWrap` setting; updates apply live.
     let wordWrap: Bool
+    /// Whether tree-sitter syntax highlighting is enabled, from the persisted
+    /// `fileEditor.syntaxHighlighting` setting; updates apply live.
+    let syntaxHighlightingEnabled: Bool
+    /// The language detected for the open file, or `nil` for unsupported types.
+    /// Highlighting attaches only when this is non-nil and highlighting is enabled.
+    let codeLanguage: CodeLanguage?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(panel: panel)
@@ -50,6 +58,12 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
             foregroundColor: themeForegroundColor,
             drawsBackground: drawsBackground
         )
+        context.coordinator.updateHighlighting(
+            on: textView,
+            enabled: syntaxHighlightingEnabled,
+            language: codeLanguage,
+            foregroundColor: themeForegroundColor
+        )
         return scrollView
     }
 
@@ -67,6 +81,12 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
         textView.applyFilePreviewTextEditorInsets()
         textView.applyFilePreviewWordWrap(wordWrap, scrollView: scrollView)
         panel.attachTextView(textView)
+        context.coordinator.updateHighlighting(
+            on: textView,
+            enabled: syntaxHighlightingEnabled,
+            language: codeLanguage,
+            foregroundColor: themeForegroundColor
+        )
         guard textView.string != panel.textContent else { return }
         context.coordinator.isApplyingPanelUpdate = true
         textView.string = panel.textContent
@@ -96,6 +116,13 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
         var panel: PanelModel
         var isApplyingPanelUpdate = false
 
+        /// The active Neon highlighter, retained so it keeps styling the view. Neon
+        /// becomes the `NSTextStorage` delegate (a different slot than this object's
+        /// `NSTextView` delegate role, so `textDidChange` — and thus saving — still
+        /// fires while highlighting is attached).
+        private var highlighter: TextViewHighlighter?
+        private var highlightedLanguage: CodeLanguage?
+
         init(panel: PanelModel) {
             self.panel = panel
         }
@@ -106,6 +133,52 @@ struct FilePreviewTextEditor<PanelModel>: NSViewRepresentable where PanelModel: 
             guard !isApplyingPanelUpdate,
                   let textView = notification.object as? NSTextView else { return }
             panel.updateTextContent(textView.string)
+        }
+
+        /// Attach, replace, or detach the syntax highlighter to match the requested
+        /// enabled state and language. Idempotent: a no-op when nothing changed.
+        @MainActor
+        func updateHighlighting(
+            on textView: SavingTextView,
+            enabled: Bool,
+            language: CodeLanguage?,
+            foregroundColor: NSColor
+        ) {
+            let desired: CodeLanguage? = enabled ? language : nil
+            let isAttached = highlighter != nil
+            guard desired != highlightedLanguage || (desired != nil) != isAttached else { return }
+
+            if isAttached {
+                detachHighlighter(from: textView, foregroundColor: foregroundColor)
+            }
+            guard let language = desired else { return }
+
+            do {
+                let configuration = try CodeHighlighterFactory.makeConfiguration(for: language)
+                highlighter = try TextViewHighlighter(
+                    textView: textView,
+                    language: configuration.language,
+                    highlightQuery: configuration.highlightQuery,
+                    attributeProvider: configuration.attributeProvider
+                )
+                highlightedLanguage = language
+            } catch {
+                // Leave the view as plain text if the grammar/queries fail to load.
+                highlighter = nil
+                highlightedLanguage = nil
+            }
+        }
+
+        /// Drop the highlighter and restore the uniform foreground color, clearing any
+        /// per-token colors it applied so disabling highlighting fully reverts the view.
+        @MainActor
+        private func detachHighlighter(from textView: SavingTextView, foregroundColor: NSColor) {
+            highlighter = nil
+            highlightedLanguage = nil
+            guard let storage = textView.textStorage else { return }
+            let fullRange = NSRange(location: 0, length: storage.length)
+            storage.removeAttribute(.foregroundColor, range: fullRange)
+            storage.addAttribute(.foregroundColor, value: foregroundColor, range: fullRange)
         }
     }
 }

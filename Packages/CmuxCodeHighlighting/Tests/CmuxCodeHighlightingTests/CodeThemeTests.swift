@@ -29,13 +29,12 @@ struct CodeThemeTests {
         #expect(theme.color(forCaptureName: "totally.unknown.capture") == theme.foreground)
     }
 
-    @Test("Attribute provider returns the capture color and the supplied font")
-    func providerReturnsColorAndFont() {
+    @Test("Attribute provider colors tokens but never overrides the font")
+    func providerReturnsColorOnly() {
         let theme = CodeTheme.dark
-        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        let provider = theme.makeAttributeProvider(font: font)
+        let provider = theme.makeAttributeProvider()
         let attrs = provider(Token(name: "keyword", range: NSRange(location: 0, length: 1)))
         #expect(attrs[.foregroundColor] as? NSColor == theme.keyword)
-        #expect(attrs[.font] as? NSFont == font)
+        #expect(attrs[.font] == nil)
     }
 }

@@ -1112,6 +1112,12 @@
           "default": false,
           "description": "Wrap long lines at the editor's right edge instead of scrolling horizontally.",
           "descriptionKey": "schemaDescriptions.fileEditor.wordWrap"
+        },
+        "syntaxHighlighting": {
+          "type": "boolean",
+          "default": true,
+          "description": "Syntax-highlight code files (Python, TypeScript, TSX, JavaScript, JSX) in the file editor.",
+          "descriptionKey": "schemaDescriptions.fileEditor.syntaxHighlighting"
         }
       }
     },

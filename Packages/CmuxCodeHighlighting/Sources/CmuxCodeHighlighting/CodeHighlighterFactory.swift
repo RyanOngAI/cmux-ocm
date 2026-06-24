@@ -36,8 +36,7 @@ public enum CodeHighlighterFactory {
     /// Build the configuration needed to attach a highlighter for `language`.
     public static func makeConfiguration(
         for language: CodeLanguage,
-        theme: CodeTheme = .dark,
-        font: NSFont
+        theme: CodeTheme = .dark
     ) throws -> CodeHighlighterConfiguration {
         let languageConfig = try languageConfiguration(for: language)
         guard let highlightQuery = languageConfig.queries[.highlights] else {
@@ -46,7 +45,7 @@ public enum CodeHighlighterFactory {
         return CodeHighlighterConfiguration(
             language: language.tsLanguage,
             highlightQuery: highlightQuery,
-            attributeProvider: theme.makeAttributeProvider(font: font)
+            attributeProvider: theme.makeAttributeProvider()
         )
     }
 }

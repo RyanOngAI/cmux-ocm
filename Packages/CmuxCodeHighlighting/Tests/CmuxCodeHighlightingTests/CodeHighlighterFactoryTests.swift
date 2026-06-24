@@ -47,8 +47,7 @@ struct CodeHighlighterFactoryTests {
 
     @Test("makeConfiguration yields a usable language + query + provider")
     func makeConfigurationSucceeds() throws {
-        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        let config = try CodeHighlighterFactory.makeConfiguration(for: .python, font: font)
+        let config = try CodeHighlighterFactory.makeConfiguration(for: .python)
         #expect(config.highlightQuery.patternCount > 0)
         let attrs = config.attributeProvider(.init(name: "keyword", range: NSRange(location: 0, length: 1)))
         #expect(attrs[.foregroundColor] != nil)

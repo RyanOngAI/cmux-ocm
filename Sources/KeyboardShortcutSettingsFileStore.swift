@@ -686,6 +686,11 @@ final class CmuxSettingsFileStore {
         } else if section.keys.contains("wordWrap") {
             logInvalid("fileEditor.wordWrap", sourcePath: sourcePath)
         }
+        if let value = jsonBool(section["syntaxHighlighting"]) {
+            snapshot.managedUserDefaults[FilePreviewSyntaxHighlightingSettings.key] = .bool(value)
+        } else if section.keys.contains("syntaxHighlighting") {
+            logInvalid("fileEditor.syntaxHighlighting", sourcePath: sourcePath)
+        }
     }
 
     private func parseSidebarSection(

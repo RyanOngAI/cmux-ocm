@@ -1,6 +1,7 @@
 import AppKit
 import AVKit
 import Bonsplit
+import CmuxCodeHighlighting
 import Combine
 import Foundation
 import PDFKit
@@ -1285,6 +1286,7 @@ struct FilePreviewPanelView: View {
     @State private var focusFlashOpacity = 0.0
     @State private var focusFlashAnimationGeneration = 0
     @AppStorage(FilePreviewWordWrapSettings.key) private var fileEditorWordWrap = FilePreviewWordWrapSettings.defaultEnabled
+    @AppStorage(FilePreviewSyntaxHighlightingSettings.key) private var fileEditorSyntaxHighlighting = FilePreviewSyntaxHighlightingSettings.defaultEnabled
 
     private var themeForegroundColor: NSColor {
         appearance.foregroundColor
@@ -1356,7 +1358,9 @@ struct FilePreviewPanelView: View {
                     themeBackgroundColor: contentBackgroundColor,
                     themeForegroundColor: themeForegroundColor,
                     drawsBackground: appearance.drawsContentBackground,
-                    wordWrap: fileEditorWordWrap
+                    wordWrap: fileEditorWordWrap,
+                    syntaxHighlightingEnabled: fileEditorSyntaxHighlighting,
+                    codeLanguage: CodeLanguage.detect(path: panel.filePath)
                 )
             case .pdf:
                 FilePreviewPDFView(

@@ -83,14 +83,15 @@ public struct CodeTheme: @unchecked Sendable {
         }
     }
 
-    /// Build a Neon attribute provider that styles each token via this theme.
-    public func makeAttributeProvider(font: NSFont) -> TokenAttributeProvider {
+    /// Build a Neon attribute provider that colors each token via this theme.
+    ///
+    /// Only the foreground color is set — never the font — so the text view's base
+    /// monospace font (and live zoom, which rewrites `NSTextView.font`) applies
+    /// uniformly to highlighted and unhighlighted text alike.
+    public func makeAttributeProvider() -> TokenAttributeProvider {
         let theme = self
         return { token in
-            [
-                .foregroundColor: theme.color(forCaptureName: token.name),
-                .font: font,
-            ]
+            [.foregroundColor: theme.color(forCaptureName: token.name)]
         }
     }
 }
