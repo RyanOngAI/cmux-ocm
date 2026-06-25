@@ -10,7 +10,6 @@ import Bonsplit
 import UserNotifications
 import Sparkle
 import CmuxUpdater
-import CmuxCommandPaletteUI
 // Selective imports: the app target also defines AppIconMode/StoredShortcut/etc.,
 // so a blanket `import CmuxSettings` here makes those names ambiguous. Import only
 // the settings symbols this file needs.
@@ -965,47 +964,47 @@ final class ShortcutHintModifierPolicyTests: XCTestCase {
 
     func testShortcutHintRequiresEnabledCommandOrControlOnlyModifier() {
         withDefaultsSuite { defaults in
-            XCTAssertTrue(ShortcutHintModifierPolicy.shouldShowHints(for: [.command], defaults: defaults))
-            XCTAssertTrue(ShortcutHintModifierPolicy.shouldShowHints(for: [.control], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowHints(for: [], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowHints(for: [.command, .shift], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowHints(for: [.control, .shift], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowHints(for: [.command, .option], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowHints(for: [.control, .option], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowHints(for: [.command, .control], defaults: defaults))
+            XCTAssertTrue(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.command]))
+            XCTAssertTrue(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.control]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: []))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.command, .shift]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.control, .shift]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.command, .option]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.control, .option]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.command, .control]))
         }
     }
 
     func testShortcutHintShowsForControlModifier() {
         withDefaultsSuite { defaults in
-            XCTAssertTrue(ShortcutHintModifierPolicy.shouldShowHints(for: [.control], defaults: defaults))
+            XCTAssertTrue(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.control]))
         }
     }
 
     func testControlOnlyShortcutHintRequiresControlModifier() {
         withDefaultsSuite { defaults in
-            XCTAssertTrue(ShortcutHintModifierPolicy.shouldShowControlHints(for: [.control], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowControlHints(for: [.command], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowControlHints(for: [.control, .shift], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowControlHints(for: [.control, .option], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowControlHints(for: [], defaults: defaults))
+            XCTAssertTrue(ShortcutHintModifierPolicy(defaults: defaults).shouldShowControlHints(for: [.control]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowControlHints(for: [.command]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowControlHints(for: [.control, .shift]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowControlHints(for: [.control, .option]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowControlHints(for: []))
         }
     }
 
     func testCommandOnlyShortcutHintRequiresCommandModifier() {
         withDefaultsSuite { defaults in
-            XCTAssertTrue(ShortcutHintModifierPolicy.shouldShowCommandHints(for: [.command], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowCommandHints(for: [.control], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowCommandHints(for: [.command, .shift], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowCommandHints(for: [.command, .option], defaults: defaults))
-            XCTAssertFalse(ShortcutHintModifierPolicy.shouldShowCommandHints(for: [], defaults: defaults))
+            XCTAssertTrue(ShortcutHintModifierPolicy(defaults: defaults).shouldShowCommandHints(for: [.command]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowCommandHints(for: [.control]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowCommandHints(for: [.command, .shift]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowCommandHints(for: [.command, .option]))
+            XCTAssertFalse(ShortcutHintModifierPolicy(defaults: defaults).shouldShowCommandHints(for: []))
         }
     }
 
     func testCommandAndControlHintsAreHardcodedEnabled() {
         withDefaultsSuite { defaults in
-            XCTAssertTrue(ShortcutHintModifierPolicy.shouldShowHints(for: [.command], defaults: defaults))
-            XCTAssertTrue(ShortcutHintModifierPolicy.shouldShowHints(for: [.control], defaults: defaults))
+            XCTAssertTrue(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.command]))
+            XCTAssertTrue(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.control]))
         }
     }
 
@@ -1022,8 +1021,8 @@ final class ShortcutHintModifierPolicyTests: XCTestCase {
         )
 
         withDefaultsSuite { defaults in
-            XCTAssertTrue(ShortcutHintModifierPolicy.shouldShowHints(for: [.command], defaults: defaults))
-            XCTAssertTrue(ShortcutHintModifierPolicy.shouldShowHints(for: [.control], defaults: defaults))
+            XCTAssertTrue(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.command]))
+            XCTAssertTrue(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.control]))
         }
     }
 
@@ -1051,8 +1050,8 @@ final class ShortcutHintModifierPolicyTests: XCTestCase {
         )
 
         withDefaultsSuite { defaults in
-            XCTAssertTrue(ShortcutHintModifierPolicy.shouldShowHints(for: [.command], defaults: defaults))
-            XCTAssertTrue(ShortcutHintModifierPolicy.shouldShowHints(for: [.control], defaults: defaults))
+            XCTAssertTrue(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.command]))
+            XCTAssertTrue(ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(for: [.control]))
         }
     }
 
@@ -1062,7 +1061,7 @@ final class ShortcutHintModifierPolicyTests: XCTestCase {
 
     func testCurrentWindowRequiresHostWindowToBeKeyAndMatchEventWindow() {
         XCTAssertTrue(
-            ShortcutHintModifierPolicy.isCurrentWindow(
+            ShortcutHintModifierPolicy().isCurrentWindow(
                 hostWindowNumber: 42,
                 hostWindowIsKey: true,
                 eventWindowNumber: 42,
@@ -1071,7 +1070,7 @@ final class ShortcutHintModifierPolicyTests: XCTestCase {
         )
 
         XCTAssertFalse(
-            ShortcutHintModifierPolicy.isCurrentWindow(
+            ShortcutHintModifierPolicy().isCurrentWindow(
                 hostWindowNumber: 42,
                 hostWindowIsKey: true,
                 eventWindowNumber: 7,
@@ -1080,7 +1079,7 @@ final class ShortcutHintModifierPolicyTests: XCTestCase {
         )
 
         XCTAssertFalse(
-            ShortcutHintModifierPolicy.isCurrentWindow(
+            ShortcutHintModifierPolicy().isCurrentWindow(
                 hostWindowNumber: 42,
                 hostWindowIsKey: false,
                 eventWindowNumber: 42,
@@ -1092,35 +1091,32 @@ final class ShortcutHintModifierPolicyTests: XCTestCase {
     func testWindowScopedShortcutHintsUseKeyWindowWhenNoEventWindowIsAvailable() {
         withDefaultsSuite { defaults in
             XCTAssertTrue(
-                ShortcutHintModifierPolicy.shouldShowHints(
+                ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(
                     for: [.command],
                     hostWindowNumber: 42,
                     hostWindowIsKey: true,
                     eventWindowNumber: nil,
-                    keyWindowNumber: 42,
-                    defaults: defaults
+                    keyWindowNumber: 42
                 )
             )
 
             XCTAssertFalse(
-                ShortcutHintModifierPolicy.shouldShowHints(
+                ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(
                     for: [.command],
                     hostWindowNumber: 42,
                     hostWindowIsKey: true,
                     eventWindowNumber: nil,
-                    keyWindowNumber: 7,
-                    defaults: defaults
+                    keyWindowNumber: 7
                 )
             )
 
             XCTAssertTrue(
-                ShortcutHintModifierPolicy.shouldShowHints(
+                ShortcutHintModifierPolicy(defaults: defaults).shouldShowHints(
                     for: [.control],
                     hostWindowNumber: 42,
                     hostWindowIsKey: true,
                     eventWindowNumber: nil,
-                    keyWindowNumber: 42,
-                    defaults: defaults
+                    keyWindowNumber: 42
                 )
             )
         }
@@ -1523,11 +1519,11 @@ final class ShortcutHintDebugSettingsTests: XCTestCase {
     }
 
     func testAlwaysShowHintsIsOnlyEnabledForUITests() {
-        XCTAssertFalse(ShortcutHintDebugSettings.alwaysShowHints(environment: [:]))
+        XCTAssertFalse(ShortcutHintDebugSettings(environment: [:]).alwaysShowHints)
         XCTAssertTrue(
-            ShortcutHintDebugSettings.alwaysShowHints(
+            ShortcutHintDebugSettings(
                 environment: ["CMUX_UI_TEST_SHORTCUT_HINTS_ALWAYS_SHOW": "1"]
-            )
+            ).alwaysShowHints
         )
     }
 
@@ -1541,7 +1537,7 @@ final class ShortcutHintDebugSettingsTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        XCTAssertTrue(ShortcutHintDebugSettings.showHintsOnCommandHoldEnabled(defaults: defaults))
+        XCTAssertTrue(ShortcutHintDebugSettings(defaults: defaults).showHintsOnCommandHoldEnabled)
     }
 
     func testShowHintsOnControlHoldIsHardcodedEnabled() {
@@ -1554,7 +1550,7 @@ final class ShortcutHintDebugSettingsTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        XCTAssertTrue(ShortcutHintDebugSettings.showHintsOnControlHoldEnabled(defaults: defaults))
+        XCTAssertTrue(ShortcutHintDebugSettings(defaults: defaults).showHintsOnControlHoldEnabled)
     }
 }
 
@@ -1569,7 +1565,7 @@ final class DevBuildBannerDebugSettingsTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         defaults.removeObject(forKey: DevBuildBannerDebugSettings.sidebarBannerVisibleKey)
-        XCTAssertTrue(DevBuildBannerDebugSettings.showSidebarBanner(defaults: defaults))
+        XCTAssertTrue(DevBuildBannerDebugSettings(defaults: defaults).showSidebarBanner)
     }
 
     func testShowSidebarBannerRespectsStoredValue() {
@@ -1581,10 +1577,10 @@ final class DevBuildBannerDebugSettingsTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         defaults.set(false, forKey: DevBuildBannerDebugSettings.sidebarBannerVisibleKey)
-        XCTAssertFalse(DevBuildBannerDebugSettings.showSidebarBanner(defaults: defaults))
+        XCTAssertFalse(DevBuildBannerDebugSettings(defaults: defaults).showSidebarBanner)
 
         defaults.set(true, forKey: DevBuildBannerDebugSettings.sidebarBannerVisibleKey)
-        XCTAssertTrue(DevBuildBannerDebugSettings.showSidebarBanner(defaults: defaults))
+        XCTAssertTrue(DevBuildBannerDebugSettings(defaults: defaults).showSidebarBanner)
     }
 }
 

@@ -1,6 +1,6 @@
 import AppKit
 import CMUXMobileCore
-import CmuxFileOpen
+import CmuxWorkspaces
 import CmuxSettingsUI
 import CmuxFoundation
 import Foundation
@@ -40,7 +40,8 @@ final class HostSettingsActions: SettingsHostActions {
     /// Retains the AppKit window hosting ``ConfigSettingsView`` so repeated
     /// "Open Config" presses reuse the same dedicated terminal-config
     /// window instead of stacking duplicates.
-    private weak var configWindow: NSWindow?
+    private var configWindow: NSWindow?
+    private var configWindowCloseObserver: WindowCloseObserver?
 
     init(configFileURL: URL) {
         self.configFileURL = configFileURL
@@ -138,6 +139,9 @@ final class HostSettingsActions: SettingsHostActions {
         window.setContentSize(NSSize(width: 980, height: 680))
         window.center()
         configWindow = window
+        configWindowCloseObserver = WindowCloseObserver(window: window) { [weak self] in
+            self?.releaseConfigWindow($0)
+        }
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
     }
@@ -158,6 +162,14 @@ final class HostSettingsActions: SettingsHostActions {
         return NSApp.windows.first {
             $0.identifier?.rawValue == configWindowIdentifier && ($0.isVisible || $0.isMiniaturized)
         }
+    }
+
+    private func releaseConfigWindow(_ window: NSWindow) {
+        guard configWindow === window else { return }
+        configWindowCloseObserver = nil
+        window.contentView = nil
+        window.contentViewController = nil
+        configWindow = nil
     }
 
     func previewNotificationSound(value: String, customFilePath: String) {
@@ -183,7 +195,7 @@ final class HostSettingsActions: SettingsHostActions {
     func setSidebarFontSize(_ points: Double) async -> Bool {
         await persistFontSize(
             key: CmuxGhosttyConfigSettingEditor.sidebarFontSizeKey,
-            points: CmuxGhosttyConfigSettingEditor.clampedSidebarFontSize(points),
+            points: CmuxGhosttyConfigSettingEditor().clampedSidebarFontSize(points),
             reloadSource: "settings.sidebar.fontSize"
         )
     }
@@ -201,13 +213,13 @@ final class HostSettingsActions: SettingsHostActions {
     func setSurfaceTabBarFontSize(_ points: Double) async -> Bool {
         await persistFontSize(
             key: CmuxGhosttyConfigSettingEditor.surfaceTabBarFontSizeKey,
-            points: CmuxGhosttyConfigSettingEditor.clampedSurfaceTabBarFontSize(points),
+            points: CmuxGhosttyConfigSettingEditor().clampedSurfaceTabBarFontSize(points),
             reloadSource: "settings.terminal.tabBarFontSize"
         )
     }
 
     func formattedFontSize(_ points: Double) -> String {
-        CmuxGhosttyConfigSettingEditor.formattedFontSize(points)
+        CmuxGhosttyConfigSettingEditor().formattedFontSize(points)
     }
 
     func mobilePairingStatus() -> MobilePairingStatusSnapshot? {
@@ -315,7 +327,7 @@ final class HostSettingsActions: SettingsHostActions {
     /// - Returns: `true` on success, `false` if the write failed (a generic
     ///   warning is logged here; the Settings UI surfaces a save-failed message).
     private func persistFontSize(key: String, points: Double, reloadSource: String) async -> Bool {
-        let formatted = CmuxGhosttyConfigSettingEditor.formattedFontSize(points)
+        let formatted = CmuxGhosttyConfigSettingEditor().formattedFontSize(points)
         guard await fontConfigWriter.write(key: key, value: formatted) else {
             hostSettingsLogger.warning("failed to persist \(key, privacy: .public)")
             return false
@@ -323,6 +335,7 @@ final class HostSettingsActions: SettingsHostActions {
         GhosttyApp.shared.reloadConfiguration(source: reloadSource)
         return true
     }
+
 }
 
 /// Wraps the opaque observer returned by `NotificationCenter.addObserver` so the

@@ -39,6 +39,7 @@ private struct SidebarObservationState: Equatable {
     let remoteConnectionDetail: String?
     let activeRemoteTerminalSessionCount: Int
     let listeningPorts: [Int]
+    let browserMediaActivity: BrowserMediaActivity
 }
 
 extension Workspace {
@@ -81,10 +82,10 @@ extension Workspace {
             $panelDirectories
         )
         let metadataFields = Publishers.CombineLatest4(
-            $statusEntries,
-            $metadataBlocks,
-            $logEntries,
-            $progress
+            sidebarMetadata.statusEntriesPublisher,
+            sidebarMetadata.metadataBlocksPublisher,
+            sidebarMetadata.logEntriesPublisher,
+            sidebarMetadata.progressPublisher
         )
         // `$pullRequestCheckStatesByPanel` is intentionally NOT observed here:
         // CI check-state flaps (pending → success, mergeStateStatus churn)
@@ -93,10 +94,10 @@ extension Workspace {
         // observes that property directly. Folding CI color into sidebar
         // badges would be a future deliberate decision, not a default.
         let gitFields = Publishers.CombineLatest4(
-            $gitBranch,
-            $panelGitBranches,
-            $pullRequest,
-            $panelPullRequests
+            sidebarMetadata.gitBranchPublisher,
+            sidebarMetadata.panelGitBranchesPublisher,
+            sidebarMetadata.pullRequestPublisher,
+            sidebarMetadata.panelPullRequestsPublisher
         )
         let remoteFields = Publishers.CombineLatest4(
             $remoteConfiguration,
@@ -112,7 +113,8 @@ extension Workspace {
             remoteFields
         )
             .combineLatest($listeningPorts)
-            .map { groupedFields, listeningPorts in
+            .compactMap { [weak self] groupedFields, listeningPorts -> SidebarObservationState? in
+                guard let self else { return nil }
                 let workspaceFields = groupedFields.0
                 let metadataFields = groupedFields.1
                 let gitFields = groupedFields.2
@@ -134,7 +136,8 @@ extension Workspace {
                     remoteConnectionState: remoteFields.1,
                     remoteConnectionDetail: remoteFields.2,
                     activeRemoteTerminalSessionCount: remoteFields.3,
-                    listeningPorts: listeningPorts
+                    listeningPorts: listeningPorts,
+                    browserMediaActivity: self.browserMediaActivity
                 )
             }
             .removeDuplicates()
