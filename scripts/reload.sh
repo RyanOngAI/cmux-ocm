@@ -1058,6 +1058,18 @@ if [[ "$LAUNCH" -eq 1 ]]; then
     -u GH_PAGER
     -u TERMINFO
     -u XDG_DATA_DIRS
+    # This script is usually run from inside a Claude Code session (the dev's
+    # agent). `open` propagates our env into the app, so CLAUDECODE=1 leaks in;
+    # every `claude` launched in a cmux terminal then sees it, self-marks as a
+    # nested "child session", and skips writing its ~/.claude transcript. Scrub
+    # the whole Claude env so spawned sessions are top-level and get transcripts.
+    -u CLAUDECODE
+    -u CLAUDE_CODE_CHILD_SESSION
+    -u CLAUDE_CODE_SESSION_ID
+    -u CLAUDE_CODE_ENTRYPOINT
+    -u CLAUDE_CODE_EXECPATH
+    -u CLAUDE_EFFORT
+    -u AI_AGENT
   )
 
   # DEBUG dogfood auto-sign-in needs no env injection here: the in-app resolver
