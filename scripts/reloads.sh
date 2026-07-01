@@ -261,7 +261,20 @@ if [[ -f "$INFO_PLIST" ]]; then
   if [[ -S "$CMUX_SOCKET_PATH_VALUE" ]]; then
     rm -f "$CMUX_SOCKET_PATH_VALUE"
   fi
-  /usr/bin/codesign --force --sign - --timestamp=none --generate-entitlement-der "$STAGING_APP_PATH" >/dev/null 2>&1 || true
+  # Prefer a stable local code-signing identity so macOS TCC (Documents/Files
+  # access) anchors its grant to a fixed certificate hash instead of the ad-hoc
+  # cdhash, which changes every rebuild and re-triggers the permission prompt.
+  # Falls back to ad-hoc when the identity is absent. Note: a self-signed cert
+  # is untrusted (CSSMERR_TP_NOT_TRUSTED), so detection must NOT use `-v`; trust
+  # is irrelevant to both signing and TCC's requirement matching.
+  STAGING_SIGN_ID="${CMUX_STAGING_SIGN_IDENTITY:-cmux-local}"
+  if security find-identity -p codesigning 2>/dev/null | grep -q "\"${STAGING_SIGN_ID}\""; then
+    # --deep is required: nested code (CmuxDockTilePlugin.plugin) must be
+    # re-signed with the same identity, else codesign rejects the outer bundle.
+    /usr/bin/codesign --force --deep --sign "$STAGING_SIGN_ID" --timestamp=none --generate-entitlement-der "$STAGING_APP_PATH" >/dev/null 2>&1 || true
+  else
+    /usr/bin/codesign --force --sign - --timestamp=none --generate-entitlement-der "$STAGING_APP_PATH" >/dev/null 2>&1 || true
+  fi
 fi
 APP_PATH="$STAGING_APP_PATH"
 
@@ -302,6 +315,18 @@ OPEN_CLEAN_ENV=(
   -u GH_PAGER
   -u TERMINFO
   -u XDG_DATA_DIRS
+  # This script is usually run from inside a Claude Code session (the dev's
+  # agent). `open` propagates our env into the app, so CLAUDECODE=1 leaks in;
+  # every `claude` launched in a cmux terminal then sees it, self-marks as a
+  # nested "child session", and skips writing its ~/.claude transcript. Scrub
+  # the whole Claude env so spawned sessions are top-level and get transcripts.
+  -u CLAUDECODE
+  -u CLAUDE_CODE_CHILD_SESSION
+  -u CLAUDE_CODE_SESSION_ID
+  -u CLAUDE_CODE_ENTRYPOINT
+  -u CLAUDE_CODE_EXECPATH
+  -u CLAUDE_EFFORT
+  -u AI_AGENT
 )
 
 # Always inject staging socket paths via env to ensure they take effect
